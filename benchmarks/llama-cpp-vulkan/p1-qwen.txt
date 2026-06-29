@@ -1,0 +1,632 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-cli \
+  -hf unsloth/Qwen3-Next-80B-A3B-Thinking-GGUF:Q4_K_XL \
+  --jinja -ngl 99 -fa 1 -c 40960 \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 1.0 \
+  -p "A TypeScript React frontend calls a Go REST service that shares protobuf-defined types with a Python analytics worker. A field is being renamed in the protobuf schema. Produce a strict, ordered execution blueprint to roll out this rename across all three services with zero downtime, listing the dependency order, the touch-points in each language, and the verification step after each stage."
+
+Loading model...
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9608-70b54e1
+model      : unsloth/Qwen3-Next-80B-A3B-Thinking-GGUF:Q4_K_XL
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> A TypeScript React frontend calls a Go REST service that shares protobuf-defined types with a Python analytics worker. A field is being renamed in the protobuf schema. Produce a strict, ordered execution blueprint to roll out this rename across all three services with zero downtime, listing the dependency order, the touch-points in each language, and the verification step after each stage.
+
+[Start thinking]
+Okay, the user is asking about renaming a field in a protobuf schema across three different services: TypeScript React frontend, Go REST service, and Python analytics worker. They want a zero-downtime rollout with strict ordering and verification steps.
+
+First, I need to unpack what "zero downtime" really means here. It's not just about keeping the services running, but ensuring that all components can communicate without breaking during the transition. Since protobuf is involved, the key challenge is handling schema evolution - specifically how to rename fields while maintaining backward compatibility.
+
+Hmm... the critical thing to remember is that protobuf handles field renames through tag numbers. The actual field name in code doesn't matter as long as the tag number stays the same. So when renaming, we should keep the old tag number and add a new field with the new name but same tag? Wait no - actually for renaming, you'd keep the old tag for the new field name, but that would break existing clients.
+
+*checks protobuf documentation mentally* Right! The proper way is to keep the old field name as deprecated but with the same tag number, and add a new field with the same tag number? No, that's not possible - each tag must be unique. I think I'm confusing myself.
+
+*rethinks* Actually: when renaming, you should:
+1. Keep the old field with its original tag number but mark it as deprecated
+2. Add a new field with a new tag number for the new name
+3. Then in a later phase, remove the old field
+
+But the user said "renamed" - which typically means they want to change the name while keeping the same semantic meaning. In protobuf best practices, you never reuse tag numbers. So the correct approach is:
+- Keep the old field (with original tag) as deprecated
+- Add new field with new tag number and new name
+- Then after all clients have migrated, remove the old field
+
+But the user specifically said "renamed", so they probably want to change the name but keep the same tag? That would be incorrect because tag numbers must be unique.
+
+*realization* Ah! I think there's a misunderstanding here. In protobuf, you don't actually "rename" a field in the sense of changing its tag number. The tag number is the identity. So if you want to change the name, you keep the same tag number but change the field name in the .proto file. But then old clients that were compiled with the old schema would still expect the old name, but since protobuf uses tags not names, it would actually work?
+
+Wait no - let's clarify:
+- Protobuf serialization uses tag numbers, not field names
+- So if you change "old_name" to "new_name" in the .proto file but keep the same tag number, then:
+  * Existing clients (compiled with old .proto) will still serialize using tag number, so when new service reads it, it'll see tag X and map to "new_name" field
+  * But if you have a client that hasn't updated, it might try to read "old_name" but the schema says "new_name" - but since it's compiled with old schema, it would still look for tag X and call it "old_name", so when new service sends data, it would use tag X but the client expects "old_name", which matches.
+
+Actually, this is safe! Because protobuf only cares about tag numbers. The field name in the .proto file is just for human readability and code generation. So if you change the field name but keep the same tag number, existing clients will continue to work because they're using the tag number.
+
+But wait - what about when the new service sends data? If it uses the new name but same tag, old clients will still process it correctly because they map tag to their local field name. Similarly, old clients sending data with old name (same tag) will be received by new service and mapped to the new name.
+
+Yes! So actually, for pure renaming (same tag number), you can do it immediately without any compatibility issues. But why would you need a rollout plan then?
+
+*checks deeper* Oh, but the issue is when you have multiple services that depend on each other. The problem isn't the protobuf serialization itself, but the code that uses the generated types. For example:
+- If the Go service has a field renamed from "oldName" to "newName", but the TypeScript frontend still passes "oldName", it will fail because the frontend expects "oldName" but the backend now expects "newName"
+
+But wait - no! Because in the HTTP API, they're probably using JSON serialization. Protobuf is for internal communication between Go and Python? The user said: "TypeScript React frontend calls a Go REST service that shares protobuf-defined types with a Python analytics worker". So:
+- Frontend -> Go REST: likely JSON over HTTP
+- Go REST -> Python analytics: probably using protobuf (since they share the schema)
+
+So the protobuf schema is shared between Go and Python for internal communication. But the frontend talks to Go via REST, which might be JSON, not protobuf.
+
+Ah! This is crucial. The renaming of the protobuf field only affects the internal Go-Python communication. The frontend doesn't know about protobuf - it talks to Go via JSON. So the Go service must handle the JSON from frontend and convert to protobuf for Python.
+
+Therefore, the rename in protobuf schema doesn't directly affect the frontend's JSON API. But the Go service might need to change its internal mapping.
+
+But the user said "a field is being renamed in the protobuf schema" - so the field that's renamed is the one used between Go and Python. The frontend doesn't interact with that directly.
+
+However, the Go service might have an HTTP endpoint that returns data that includes this field. For example:
+- Frontend calls GET /data
+- Go service fetches from DB or Python, then converts to JSON for frontend
+
+If the protobuf schema field is renamed (say "old_field" to "new_field"), but the Go service's JSON output still uses "old_field", then frontend would break. So actually, we need to consider:
+- The Go service's API contract with frontend might be affected if it exposes the protobuf field in its JSON response
+
+So steps needed:
+1. First, update the Go service to handle both old and new names in its internal logic (for the protobuf field) while still exposing old name in JSON for frontend
+2. Then update frontend to use new name
+3. Then update Go service to stop using old name in JSON
+4. Then update Python worker to use new name
+
+But since the protobuf schema change is between Go and Python, the critical part is making sure that when Go sends protobuf to Python, it uses the correct field name, but also that Python can handle old and new.
+
+Wait, but as established earlier, for protobuf communication, if you just change the field name but keep same tag, it's backward compatible. So:
+- If Go service is updated to use new name for the field (same tag), then when it sends to Python, Python with old schema will still read it because tag is same - it will map to its old field name
+- Similarly, if Python sends with old name (same tag), Go with new schema will read it as new name
+
+So actually for the Go-Python protobuf communication, renaming the field (same tag) is safe without any rollout steps.
+
+But the problem comes from the JSON API that frontend uses. For example:
+- Suppose the Go service has a JSON response that includes "old_field"
+- The frontend expects "old_field"
+- But internally, Go is now using "new_field" for the protobuf field
+
+So if Go doesn't change its JSON output, frontend is fine. But if we want to update the frontend to use "new_field", we need a way to do it without breaking.
+
+Therefore, the actual challenge is:
+- How to rename a field in the API contract between frontend and Go service, while also updating the internal protobuf schema
+
+But the user said "a field is being renamed in the protobuf schema" - which might be the same field that's exposed in the JSON API.
+
+So let's assume the field in question is part of the JSON API that frontend uses. For example, the Go service has an endpoint that returns a struct with field "oldName", and this struct is generated from protobuf (so the protobuf field is also called "oldName"). Now we want to rename it to "newName" in both places.
+
+In that case, the rollout needs to:
+- Update the protobuf schema to have both old and new names (with same tag? No - can't have same tag for two fields)
+
+Actually, for the protobuf schema itself, if you're changing the field name but keeping the same semantic, you should keep the same tag number. Then:
+- The old protobuf code (e.g., in Python) will still see the field as "oldName" even though in new .proto it's called "newName", because the tag is same
+- But when generating code, if you change the name but keep tag, the generated code for the new service will have the new name, but old services will have old name
+
+But for compatibility, this is safe because the tag is what matters.
+
+However, for the JSON API, if Go is returning a struct that has field "oldName" in JSON, and we want to change it to "newName", that's a breaking change for frontend. So we need to handle that carefully.
+
+So the strict plan must:
+1. First, update Go service to support both old and new field names in its JSON output (so it returns both "oldName" and "newName" with same value)
+2. Then update frontend to use "newName" while still accepting "oldName" for backward compatibility
+3. Then update Go service to stop returning "oldName" (only "newName")
+4. Then update protobuf schema to rename the field (same tag) - but this might not be necessary since the JSON change is already done
+
+But the protobuf rename is separate from JSON API. Since the frontend doesn't use protobuf, only Go and Python do, the protobuf rename can happen independently as long as Go-Python communication is handled properly.
+
+Let me structure this:
+
+- The field in question exists in:
+  * Frontend -> Go: via JSON API (so Go's HTTP response uses a field name)
+  * Go -> Python: via protobuf (so the protobuf has a field with a name)
+
+When we rename, we need to change both the JSON field name and the protobuf field name. But they might be independent.
+
+However, typically, the Go service might have a struct that is used for both JSON serialization and protobuf serialization. So if the struct field is renamed, it affects both.
+
+So let's assume:
+- Go has a struct like:
+  type Response struct {
+    OldField string `json:"old_field" protobuf:"1"`
+  }
+- We want to rename to NewField with json:"new_field" and protobuf:"1"
+
+In this case:
+- The protobuf tag is same (1) so for Go-Python communication, it's safe to change the field name in .proto because tag is same
+- But for JSON, if we change the struct field name, then the JSON output will change from "old_field" to "new_field", which breaks frontend
+
+So the rollout must:
+1. First, update Go service to have both fields: OldField (with json:"old_field") and NewField (with json:"new_field", but same protobuf tag)
+2. Then update frontend to use new_field
+3. Then remove OldField from Go service struct
+
+But for the protobuf part, since it's the same tag, we can change the .proto file immediately - but that might confuse if Go has two fields for protobuf? No, because protobuf doesn't care about struct field names, only tags. So if in Go code, we have:
+  type Response struct {
+    OldField string `protobuf:"1"`
+    NewField string `protobuf:"1"` // invalid - duplicate tag
+  }
+That won't work.
+
+Ah, right! In Go, you can't have two fields with same protobuf tag. So for the protobuf schema, if we want to rename, we must:
+- In .proto file: keep the old field name but mark deprecated, and add a new field with new name but different tag? No - that's not renaming, that's adding a new field.
+
+This is confusing. Let's clarify protobuf best practices for renaming:
+
+According to protocol buffers documentation:
+- You can rename a field by keeping the same tag number. The field name in the .proto file is just for code generation; the serialization uses the tag.
+- So if you change "old_name" to "new_name" in .proto, but keep the same tag number, then:
+  * Existing clients (compiled with old .proto) will still work because they use the tag
+  * New clients will use the new name but same tag
+
+So for Go and Python services that share the protobuf schema, when you update the .proto file to rename the field (same tag), it's backward compatible.
+
+But in the Go code, when you generate new structs, the struct field name will change from "OldName" to "NewName". So if the Go service has a struct field called OldName and you change it to NewName in the generated code, then any Go code that references OldName will break.
+
+So for the Go service itself, if it's using the protobuf struct directly for its JSON API, then changing the struct field name will break the JSON output.
+
+Therefore, the correct rollout plan must:
+
+1. First, update the Go service to use a new struct for the JSON API that has both old and new field names (but for protobuf, we'll keep using the same tag)
+   - But how? We can't have two fields with same protobuf tag in Go code.
+
+Alternative approach:
+
+- In the .proto file, do not rename immediately. Instead:
+  a. Add a new field with new name and new tag number
+  b. Mark the old field as deprecated
+  c. Update all services to use the new field
+  d. Then remove the old field
+
+That's the standard safe way to change field names in protobuf.
+
+Yes, that makes sense. Because:
+- You can't reuse a tag number for a new field (but you can mark old tag as deprecated)
+- So for backward compatibility:
+  * Add new field with new tag and new name
+  * Keep old field with old tag (deprecated)
+  * Then later remove old field
+
+So the plan should be:
+
+Phase 1: Add new field in protobuf schema (same semantic as old field, but new tag and new name), mark old field deprecated.
+Phase 2: Update all services to use new field
+Phase 3: Remove old field
+
+But the question is about renaming - so this is how you safely rename.
+
+So for zero-downtime rollout:
+
+1. First, update the protobuf schema to:
+   - Keep the old field with its original tag (but add [deprecated=true])
+   - Add a new field with a new tag number and new name
+   - This is safe because existing clients will ignore the new field (since they don't know about it) and still use the old field
+
+2. Then update services to use the new field for reading/writing, but still support the old field for backward compatibility
+
+3. Then remove the old field after all services are updated
+
+Now, since there are three services with different languages, we need to sequence the updates.
+
+Let's map the dependencies:
+
+- The Go REST service is the central point:
+  * Receives requests from frontend (JSON)
+  * Sends protobuf messages to Python worker
+  * Might also have internal logic using the field
+
+- Frontend talks to Go via JSON, so it doesn't know about protobuf tags. But if Go's JSON API uses the field name, then when we add a new field in protobuf, Go might need to map it to JSON.
+
+- Python worker only communicates with Go via protobuf, so it will be affected by the protobuf schema change.
+
+So the rollout order should start from the most downstream component (Python) or upstream? Let's think about dependencies:
+
+- If we update Python first: it might not know about the new field yet, but since we're adding a new field (not removing old), Python with old schema can still read the message because the old field is still there. But if Go starts sending both old and new fields, Python won't see the new field until updated.
+
+- Similarly, frontend doesn't care about protobuf fields directly.
+
+The safest order is:
+
+1. Update the protobuf schema to add new field (new tag) and mark old deprecated - but don't remove old.
+2. Update Go service to:
+   - Read from both old and new fields (but prefer new)
+   - Write to both old and new fields? Or only new?
+   - Also, for JSON API, if the field is exposed, update Go to output both old and new names
+3. Update frontend to use the new field name in its JSON requests/responses
+4. Update Python worker to read from new field (and ignore old)
+5. Then remove old field from protobuf
+
+But we need to do it in an order that avoids breaking any service at any step.
+
+Let's think of a concrete example:
+
+Suppose original schema:
+message Data {
+  string old_field = 1;
+}
+
+We want to rename to new_field.
+
+Step 1: Update .proto to:
+message Data {
+  string old_field = 1 [deprecated=true];
+  string new_field = 2;
+}
+
+Now, Go service is still using old_field in code. Python worker is using old_field.
+
+Phase 1: Update Go service to:
+- When receiving protobuf from Python: read from both old_field and new_field, but if new_field exists, use that
+- When sending to Python: set both old_field and new_field with same value
+- For JSON API: return both "old_field" and "new_field" in JSON
+
+But for Go code, the generated struct will have OldField and NewField fields. So in Go, we'd have:
+type Data struct {
+  OldField string `protobuf:"1"`
+  NewField string `protobuf:"2"`
+}
+
+Then in Go service, when processing a Data struct, it would check if NewField is set, else use OldField.
+
+Phase 2: Update frontend to use "new_field" in its JSON requests/responses. But since Go is still returning "old_field", we need Go to return both for backward compatibility.
+
+Phase 3: Update Python worker to:
+- When receiving from Go: read from new_field if present, else old_field
+- When sending to Go: set both old_field and new_field
+
+Phase 4: After all services are updated to use new_field, remove old_field from protobuf schema.
+
+But the question is about rolling out a rename with zero downtime, so we need to sequence these steps carefully.
+
+Let's list the exact order:
+
+1. Update protobuf schema: add new field (new tag), mark old as deprecated. Commit this change.
+   - Verification: Check that .proto file has both fields with correct tags and deprecation.
+
+2. Update Go service to:
+   - Generate new structs from updated .proto
+   - In code, for any read operation on the field, use the new field if available, else fall back to old
+   - For write operations, set both old and new fields to the same value
+   - For JSON API, output both "old_field" and "new_field" (so frontend can still work with old name)
+   - Verification: Run tests that:
+        * When receiving protobuf with only old_field, Go correctly uses it for new_field
+        * When sending, both fields are set
+        * JSON response has both fields
+
+3. Update frontend to use "new_field" instead of "old_field" in its API calls.
+   - But since Go is still returning "old_field", we need to make sure frontend can handle both or just use new_field. Actually, if Go returns both, frontend can read from new_field. But to be safe, frontend should first check for new_field, else use old_field during transition.
+   - Verification: Test frontend with Go service that has the new code (returning both fields) and ensure it uses new_field.
+
+4. Update Python worker to:
+   - Generate new structs
+   - For reads: use new_field if present, else old_field
+   - For writes: set both old_field and new_field
+   - Verification: Test Python worker with Go service that sends both fields, and ensure it reads from new_field.
+
+5. Now, update Go service to stop setting old_field (only set new_field)
+   - But wait, if Python is already updated to read new_field, then Go can send only new_field. However, if there's any Python worker still using old schema (but we updated Python in step 4, so it should be fine), but actually, after step 4, Python is updated, so it's safe.
+   - But also, frontend is updated to use new_field, so Go doesn't need to return old_field in JSON anymore. So update Go to:
+        * Only set new_field when sending protobuf
+        * Only return new_field in JSON response
+   - Verification: Check that frontend works with Go returning only new_field, and Python works with Go sending only new_field.
+
+6. Update protobuf schema to remove old_field.
+   - Now the .proto has only new_field with tag 2 (or whatever)
+   - Verification: All services work with new schema.
+
+But there's a problem in step 5: if we update Go to stop setting old_field, but there might be Python workers that haven't updated yet? No, because we updated Python in step 4 before step 5. So after step 4, all Python workers are updated to read new_field and ignore old_field (or handle it). Then in step 5, Go stops sending old_field, which is fine because Python no longer needs it.
+
+Similarly, for frontend: in step 3 we updated frontend to use new_field. In step 5, Go stops returning old_field in JSON, but frontend only uses new_field so it's fine.
+
+But actually, after step 4 (Python updated), and step 3 (frontend updated), then in step 5 we can update Go to stop using old_field.
+
+Then step 6: remove from schema.
+
+However, there's another way: after all services are updated to use new_field (steps 2-4), then we can update protobuf to remove old_field. But the order of steps 2-4 must be such that no service is broken.
+
+Let me sequence it properly:
+
+1. Update .proto: add new field, mark old deprecated.
+   - This is safe because old services don't know about new field, so they ignore it.
+
+2. Update Go service to:
+   - Use new field for writes and reads (with fallback to old)
+   - Output both fields in JSON
+   - Verification: Test that when Go receives protobuf with only old_field, it correctly maps to new_field internally; when sending, sets both; JSON has both fields.
+
+3. Update frontend to use new_field name (and ignore old_field if present). Since Go is returning both, frontend can safely use new_field.
+   - Verification: Frontend works with the new field name, and still functions when Go returns old_field (but it should prefer new_field).
+
+4. Update Python worker to:
+   - Use new field for writes and reads (with fallback to old)
+   - Verification: Python can handle messages from Go that have both fields or only new_field; also, when sending, sets both fields.
+
+5. Now, update Go service to stop setting old_field in protobuf (only set new_field) and stop returning old_field in JSON.
+   - Why? Because now Python is updated to read new_field (step 4), so it doesn't need old_field. Similarly, frontend is updated to use new_field in JSON, so Go doesn't need to return old_field.
+   - Verification: Check that Go sends only new_field in protobuf; JSON response has only new_field; frontend and Python work correctly.
+
+6. Update .proto to remove old_field.
+   - This is safe because all services have been updated to use new_field and don't rely on old_field anymore.
+   - Verification: All services compile and run with the new schema.
+
+This seems solid.
+
+But let's check if any step could break:
+
+- After step 1 (schema update), Go is still using old code. But since we haven't updated Go yet, it will ignore the new field because it doesn't know about it. So no problem.
+
+- Step 2: Go updated to handle both fields. Now when Go receives protobuf from Python (which hasn't been updated yet), Python still only sets old_field. Go will read old_field and set new_field internally. When Go sends to Python, it sets both fields. But Python with old schema doesn't know about new_field, so it ignores it. So Python works fine.
+
+- Step 3: Frontend updated to use new_field. Since Go is now returning both fields in JSON, frontend can read new_field. It's safe.
+
+- Step 4: Python updated to handle both fields. Now when Go sends both fields (which it does until step 5), Python reads new_field. When Python sends to Go, it sets both fields. But Go is already updated to handle both, so it's fine.
+
+- Step 5: Go stops sending old_field. Python is updated to read only new_field, so it's fine. Frontend only uses new_field in JSON, so Go can stop returning old_field.
+
+- Step 6: Remove old_field from schema. All services are using new_field, so no problem.
+
+Yes, this works.
+
+Now for the blueprint:
+
+Strict ordered execution blueprint for field rename across all services with zero downtime.
+
+Dependencies:
+- Protobuf schema change must happen before any service updates that depend on it (but since we're adding a new field first, it's safe to update schema early)
+- Go service is central: it talks to frontend (JSON) and Python (protobuf)
+- Frontend depends on Go's JSON API
+- Python depends on Go's protobuf API
+
+Order:
+
+1. Update protobuf schema:
+   - Add new field with new tag number
+   - Mark old field as deprecated
+   - Commit change to schema repository
+   - Verification: Schema validates, new field has unique tag, old field is marked deprecated.
+
+2. Update Go service to handle both fields:
+   - Regenerate protobuf structs from updated schema
+   - In code, for reading the field: check new_field first, fall back to old_field if empty
+   - For writing: set both old_field and new_field to same value
+   - In JSON response: return both "old_field" and "new_field"
+   - Verification:
+        * Test case: receive protobuf with only old_field -> Go correctly uses it for new_field
+        * Test case: when sending to Python, both fields are set
+        * Test case: JSON response contains both fields
+
+3. Update frontend to use new_field:
+   - Modify React code to reference "new_field" instead of "old_field" in API requests/responses
+   - Ensure it handles cases where only old_field is present (but ideally, since Go returns both, it can use new_field)
+   - Verification:
+        * Frontend makes request and receives response with new_field; it uses new_field correctly
+        * Test with Go service still returning both fields
+
+4. Update Python analytics worker to handle both fields:
+   - Regenerate protobuf structs
+   - In code, for reading: check new_field first, fall back to old_field
+   - For writing: set both old_field and new_field
+   - Verification:
+        * Test with Go service sending both fields: Python reads new_field correctly
+        * Test when sending to Go: both fields are set
+
+5. Update Go service to stop using old_field:
+   - Change write logic to only set new_field (not old_field)
+   - Remove old_field from JSON response (only return new_field)
+   - Verification:
+        * Go sends only new_field in protobuf to Python
+        * JSON response has only new_field
+        * Frontend works with only new_field in JSON
+        * Python works with only new_field in protobuf
+
+6. Update protobuf schema to remove old_field:
+   - Remove the deprecated field from .proto file
+   - Commit change
+   - Verification:
+        * All services can compile and run with new schema
+        * Test end-to-end flow with all services using new schema
+
+This ensures zero downtime because at every step, all services can communicate without breaking. The key is that during transitions, services handle both old and new field names/tags.
+
+Now, to write the response as a strict ordered blueprint.
+
+[End thinking]
+
+### Strict Zero-Downtime Field Rename Rollout Blueprint
+**Core Principle**: Protobuf uses **tag numbers** for serialization (not field names). Renaming requires adding a new field with a new tag while preserving the old field (marked deprecated) until all services migrate. This avoids breaking changes during transition.
+
+---
+
+#### **Phase 0: Pre-Validation & Preparation**
+- **Verify current state**:
+  - Confirm field name to rename (e.g., `old_field` → `new_field`).
+  - Ensure all services use the same protobuf schema version (no uncommitted changes).
+  - Run end-to-end tests with *current* schema to establish baseline.
+- **Create backup branches**:
+  - Git branches for each service (`frontend`, `go-api`, `python-analytics`) and protobuf schema repo.
+
+---
+
+### 🔰 **Execution Order**
+*(Strict sequence; no step may proceed until verification passes)*
+
+#### **1. Update Protobuf Schema (Add New Field, Mark Old Deprecated)**
+- **Action**:
+  - In `.proto` file:
+    ```proto
+    message Data {
+      string old_field = 1 [deprecated = true]; // Keep existing tag
+      string new_field = 2;                    // New tag (e.g., 2)
+    }
+    ```
+  - Commit change to schema repository.
+- **Dependency**: None (schema update is additive; safe for all existing services).
+- **Verification**:
+  - Run `protoc --validate` on updated schema → passes.
+  - Confirm new field has **unique tag number** (no collisions).
+  - Test that `old_field` and `new_field` coexist in generated code for Go/Python.
+- **Success Criterion**: Schema validates; old field remains functional; new field is accessible but unused by current services.
+
+#### **2. Update Go REST Service (Handle Both Fields)**
+- **Action**:
+  - Regenerate Go protobuf structs from updated schema.
+  - Modify business logic:
+    ```go
+    // Reading: prefer new_field, fall back to old_field
+    func process(data *pb.Data) {
+      value := data.NewField
+      if value == "" {
+        value = data.OldField // Backward compatibility
+      }
+    }
+
+    // Writing: set both fields identically
+    func sendToPython() {
+      pbData := &pb.Data{
+        OldField: value,
+        NewField: value, // Always mirror
+      }
+    }
+
+    // JSON API: return both field names in responses
+    type JSONResponse struct {
+      OldField string `json:"old_field"`
+      NewField string `json:"new_field"` // Frontend will use this
+    }
+    ```
+  - Deploy Go service (e.g., blue/green deployment).
+- **Dependency**: Protobuf schema update (Step 1) must be complete.
+- **Verification**:
+  - **Test 1**: Send protobuf message with *only* `old_field` → Go correctly populates `new_field` internally.
+  - **Test 2**: Go sends to Python → both `old_field` and `new_field` are set in protobuf.
+  - **Test 3**: HTTP endpoint returns JSON with **both** `old_field` and `new_field`.
+- **Success Criterion**: Go handles old/new fields seamlessly; JSON API fully backward-compatible.
+
+#### **3. Update TypeScript React Frontend**
+- **Action**:
+  - Modify frontend code to use `new_field` (ignore `old_field`):
+    ```typescript
+    // Before:
+    const value = response.old_field;
+
+    // After:
+    const value = response.new_field || response.old_field; // Fallback during transition
+    ```
+  - Deploy frontend (e.g., CDN cache invalidation).
+- **Dependency**: Go service must be updated (Step 2) to return both fields in JSON.
+- **Verification**:
+  - **Test 1**: Frontend makes request → receives JSON with `new_field` and uses it correctly.
+  - **Test 2**: Simulate Go returning *only* `old_field` (e.g., via mock) → frontend falls back safely.
+- **Success Criterion**: Frontend works with Go’s new JSON structure; no errors in browser console.
+
+#### **4. Update Python Analytics Worker**
+- **Action**:
+  - Regenerate Python protobuf structs from updated schema.
+  - Modify business logic:
+    ```python
+    # Reading: prefer new_field, fall back to old_field
+    def process(data):
+        value = data.new_field
+        if not value:
+            value = data.old_field
+
+    # Writing: set both fields identically
+    def send_to_go():
+        pb_data = Data(
+            old_field=value,
+            new_field=value  # Always mirror
+        )
+    ```
+  - Deploy Python worker (e.g., rolling update).
+- **Dependency**: Go service must be updated (Step 2) to send both fields in protobuf.
+- **Verification**:
+  - **Test 1**: Receive protobuf from Go with *both* fields → Python uses `new_field`.
+  - **Test 2**: Python sends to Go → both `old_field` and `new_field` are set.
+- **Success Criterion**: Python reads/writes correctly using new field; no data loss.
+
+#### **5. Update Go REST Service (Stop Using Old Field)**
+- **Action**:
+  - Modify Go code:
+    ```go
+    // Writing: ONLY set new_field (remove old_field)
+    func sendToPython() {
+      pbData := &pb.Data{
+        NewField: value, // No more old_field
+      }
+    }
+
+    // JSON API: return ONLY new_field
+    type JSONResponse struct {
+      NewField string `json:"new_field"` // Remove old_field
+    }
+    ```
+  - Deploy Go service (blue/green).
+- **Dependency**: Python worker must be updated (Step 4) to read only `new_field`.
+- **Verification**:
+  - **Test 1**: Go sends protobuf with *only* `new_field` → Python reads it correctly.
+  - **Test 2**: HTTP endpoint returns JSON with **only** `new_field` → frontend uses it without fallback.
+  - **Test 3**: Old-field-related logic is fully removed (no references in code).
+- **Success Criterion**: Go no longer uses/writes `old_field`; frontend and Python operate on new field exclusively.
+
+#### **6. Update Protobuf Schema (Remove Deprecated Field)**
+- **Action**:
+  - In `.proto` file:
+    ```proto
+    message Data {
+      // Remove old_field entirely
+      string new_field = 2;
+    }
+    ```
+  - Commit change to schema repository.
+- **Dependency**: Go service must be updated (Step 5) to stop using `old_field`; Python worker must be updated (Step 4).
+- **Verification**:
+  - Regenerate code for all services → compile without errors.
+  - Run end-to-end tests with **new schema only** (no old field references).
+- **Success Criterion**: Schema is clean; all services compile and run with final schema.
+
+---
+
+### 🚨 Critical Rules for Zero Downtime
+1. **No reverse order**: Steps must execute in strict sequence. Skipping verification blocks progression.
+2. **All services must be updated before removing the old field**:
+   - Step 5 (Go stops using old field) → Step 6 (remove from schema) is the only safe removal point.
+3. **Protobuf tag numbers never change for renamed fields**:
+   - `old_field` retains tag `1` until final removal; `new_field` uses a *new* tag (e.g., `2`).
+4. **Frontend and Python are updated *after* Go**:
+   - Go is the central hub; it must handle both fields before frontend/Python migrate.
+5. **Testing at each stage**:
+   - Use canary deployments for Go/Python; verify traffic patterns with monitoring (e.g., metrics for `old_field` usage dropping to zero).
+
+### 💡 Why This Works
+- **Backward compatibility preserved** at every step via dual-field handling.
+- **No service is ever broken**:
+  - Step 1: Schema update is additive → safe for all services.
+  - Steps 2–4: Services handle both fields → old and new coexist.
+  - Steps 5–6: Old field is phased out *only after* all dependencies use the new field.
+- **Downtime avoided**: Traffic flows through updated services without interruption during deployments (using blue/green or rolling updates).
+
+> ✅ **Final Check**: After Step 6, confirm:
+> - Protobuf schema has **no deprecated fields**.
+> - All services use `new_field` exclusively (audit code for `old_field` references).
+> - Monitoring shows 0% usage of deprecated field.
+
+[ Prompt: 239.5 t/s | Generation: 55.4 t/s ]

@@ -1,0 +1,17 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-batched-bench \
+  -hf unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_XL \
+  -c 16384 -ngl 99 \
+  -npp 1024 -ntg 256 -npl 1,2,4,8
+Downloading Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL… ─────────────── 100%
+11.39.520.357 W load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+11.41.701.276 W llama_context: n_ctx_seq (2048) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+
+llama_batched_bench: n_kv_max = 16384, n_batch = 2048, n_ubatch = 512, flash_attn = -1, is_pp_shared = 0, is_tg_separate = 0, n_gpu_layers = 99, n_threads = 16, n_threads_batch = 16
+
+|    PP |     TG |    B |   N_KV |   T_PP s | S_PP t/s |   T_TG s | S_TG t/s |      T s |    S t/s |
+|-------|--------|------|--------|----------|----------|----------|----------|----------|----------|
+|  1024 |    256 |    1 |   1280 |    0.953 |  1074.43 |    3.072 |    83.32 |    4.026 |   317.97 |
+|  1024 |    256 |    2 |   2560 |    1.607 |  1274.05 |    4.249 |   120.49 |    5.857 |   437.09 |
+|  1024 |    256 |    4 |   5120 |    3.394 |  1206.93 |    6.418 |   159.56 |    9.811 |   521.85 |
+|  1024 |    256 |    8 |  10240 |    6.975 |  1174.47 |   10.474 |   195.53 |   17.449 |   586.84 |

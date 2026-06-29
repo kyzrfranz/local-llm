@@ -1,0 +1,251 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-cli \
+  -hf unsloth/Qwen3-Next-80B-A3B-Thinking-GGUF:Q4_K_XL \
+  --jinja -ngl 99 -fa 1 -c 40960 \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 1.0 \
+  -p "A 4,000-line Java module handles auth, and we're splitting it into a Kotlin auth-core library plus a thin Java adapter, with no behavior change and no break to the 30+ call sites. Produce a strict execution blueprint: the decomposition, the safe ordering of extractions, what must be verified at each step, and where the risks are."
+
+
+Loading model...
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9608-70b54e1
+model      : unsloth/Qwen3-Next-80B-A3B-Thinking-GGUF:Q4_K_XL
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> A 4,000-line Java module handles auth, and we're splitting it into a Kotlin auth-core library plus a thin Java adapter, with no behavior change and no break to the 30+ call sites. Produce a strict execution blueprint: the decomposition, the safe ordering of extractions, what must be verified at each step, and where the risks are.
+
+[Start thinking]
+Okay, the user has a 4,000-line Java module handling authentication that they want to split into a Kotlin auth-core library and a thin Java adapter. They need a strict execution blueprint with decomposition steps, safe ordering of extractions, verification points, and risk areas. No behavior changes and no breaking 30+ call sites.
+
+Hmm, this is a classic refactoring challenge but with high stakes—auth systems are critical and fragile. The user is likely a senior engineer or tech lead under pressure to deliver this safely. They didn't say it, but they're probably worried about:
+- Undetected bugs in auth logic (security vulnerabilities would be catastrophic)
+- Breaking existing integrations (30+ call sites means many teams depend on this)
+- Kotlin-Java interop pitfalls (like nullability mismatches or default parameter issues)
+
+First, I need to mentally walk through how to decompose this without touching the call sites. The key is keeping the original Java class intact during extraction—like building a new bridge while the old one is still in use.
+
+*Pauses to visualize the architecture*
+The original module (let's call it `LegacyAuth.java`) is used by 30+ places. If I directly move code out of it, those call sites would break immediately. So the only safe path is:
+1. Create a new Kotlin library (auth-core) that *does nothing yet*
+2. Gradually move small chunks of logic to auth-core while having LegacyAuth delegate to it
+3. Only when everything is delegated, remove LegacyAuth's implementation and make it just a thin adapter
+
+But how to chunk the work? Auth modules usually have:
+- Configuration (e.g., token validation rules)
+- Core operations (token generation, verification)
+- Helper utilities (date parsing, base64 encoding)
+- External service calls (LDAP, OAuth providers)
+
+Ah! The safest extraction order should be from least risky to most risky:
+1. Pure utility methods first (e.g., string sanitization) — these are usually stateless and easy to test
+2. Configuration-handling code — often just data classes or simple getters
+3. Then core operations like token verification *if* they're pure functions
+4. Finally, external service calls — these have side effects (network calls, DB) so they're riskiest
+
+*Checks for hidden traps*
+- Kotlin's null safety could bite if LegacyAuth uses unchecked nulls. Need to validate all nullability annotations.
+- If LegacyAuth has static methods, moving them to Kotlin might require companion objects — but call sites would break unless we keep the static facade. Better to avoid touching static methods first.
+- What if the original module has hidden dependencies? Like a singleton instance used elsewhere? Must map all dependencies before extracting.
+
+*Verifies the blueprint stages*
+For each extraction step:
+- Must have unit tests covering the moved code *before* extraction (if they don't exist, create them)
+- After moving, LegacyAuth should call auth-core with identical parameters and return values — verified by existing tests
+- No new test cases needed since behavior shouldn't change, but existing tests must pass
+
+*Risks to highlight*
+- **Nullability**: Kotlin will enforce null safety. If Java code passes `null` to a Kotlin function that expects non-null, it crashes at runtime. Must add `@Nullable`/`@NonNull` annotations in Java first.
+- **Default parameters**: If auth-core uses Kotlin default args, Java call sites would break because Java doesn't know defaults. So core functions must have no default parameters initially — or use overloads.
+- **Stateful logic**: If the module has mutable state (e.g., cached tokens), extracting it might change concurrency behavior. Must verify thread safety in unit tests.
+- **Reflection or bytecode manipulation**: If LegacyAuth uses reflection on private fields, moving to Kotlin might break because Kotlin compiles differently.
+
+*Thinks about the adapter layer*
+The "thin Java adapter" will be the final step. But actually, during extraction, LegacyAuth *is* the adapter — it just delegates to auth-core. So:
+- Stage 1: LegacyAuth calls auth-core for extracted methods
+- Stage 2: Once all code is moved, LegacyAuth becomes a trivial pass-through (maybe just a wrapper class)
+- Stage 3: Then we can delete LegacyAuth and have the adapter be the new public API? Wait no — the user said "thin Java adapter", so probably LegacyAuth becomes the adapter. But call sites must stay pointing to LegacyAuth until the very end.
+
+*Realizes a critical point*
+The call sites are fixed to `LegacyAuth` — so we can't change their imports. That means:
+- The adapter must be named exactly the same as the original class (e.g., `AuthManager.java`)
+- We'll have to keep the original class name throughout, but eventually move its implementation to Kotlin via delegation
+
+So the process is:
+1. Create `AuthCore.kt` (Kotlin library)
+2. In `LegacyAuth.java` (which stays as the public API), for each extracted method:
+   - Copy the implementation to `AuthCore`
+   - In `LegacyAuth`, replace the method body with `return AuthCore.method(...)`
+3. Verify via unit tests that LegacyAuth still behaves identically
+4. Repeat for all methods
+
+But wait — if we move a method to Kotlin, but LegacyAuth still has the same signature, that's safe. However, if the original Java method had side effects or internal state, moving it might change behavior. So each extraction must be atomic and verified.
+
+*Structures the blueprint*
+- Phase 0: Prepare (critical!)
+  - Write unit tests for every public method of LegacyAuth (if missing)
+  - Map all dependencies (DB connections, config objects, etc.) — isolate them as inputs to methods where possible
+  - Add `@Nullable` annotations to Java code for any parameter/return that could be null
+
+- Phase 1: Extract utilities (e.g., string helpers, date parsers)
+  - Move pure functions first — they're low risk
+  - Verify: existing tests pass, no new warnings in IDE for nullability
+
+- Phase 2: Extract configuration logic
+  - Move config classes to Kotlin (data classes are safe)
+  - Verify: LegacyAuth still reads config correctly, no side effects
+
+- Phase 3: Extract core operations (e.g., token verification)
+  - If it's pure (no side effects), move it; if not, mock dependencies in tests
+  - Verify: integration tests for token validation pass
+
+- Phase 4: Extract external service calls (e.g., LDAP lookup)
+  - This is highest risk — must isolate dependencies via interfaces
+  - Create test doubles for network calls
+  - Verify: all tests pass with mocked services
+
+- Phase 5: Final cleanup
+  - Once all code is in auth-core, LegacyAuth becomes a trivial delegator
+  - Then we can rename LegacyAuth to "AuthAdapter" if needed (but call sites don't change)
+  - Finally, move the adapter to Kotlin too? No — user said "thin Java adapter", so probably keep it as Java but just pass-through
+
+*Checks for completeness*
+- What about static methods? If LegacyAuth has `public static void login(...)`, moving to Kotlin would require companion object. But Java can still call it via `AuthCore.Companion.login()`, which breaks call sites. So better to:
+  - Keep static methods in Java, but delegate to Kotlin helper functions
+  - Or refactor static methods to instance methods first — but that might be too big a change. Safer to leave statics untouched until last.
+
+- What about inner classes? If LegacyAuth has nested classes, moving them to auth-core might require restructuring. Probably better to extract as top-level Kotlin classes first.
+
+*Final risk summary*
+- **Null safety**: Biggest hidden killer. If Java passes null to Kotlin non-null param, crash. Must audit all parameters.
+- **Concurrency**: If LegacyAuth uses synchronized blocks, moving to Kotlin might change thread behavior. Verify with stress tests.
+- **Dependencies**: If auth-core needs new libraries (e.g., for JWT), but legacy code used different ones — must ensure compatibility.
+- **Versioning**: If auth-core is published as a library, all consumers must update. But since it's internal, we can control this.
+
+*Conclusion*
+The strict blueprint must:
+- Start with 100% test coverage for existing functionality
+- Extract in order of risk (pure → config → core → external)
+- At each step, verify via tests that LegacyAuth's behavior is identical
+- Never change call site code until the very end (when LegacyAuth becomes just a delegator)
+
+And the absolute non-negotiable: after every single extraction, run all 30+ call site integration tests. If any test fails, revert immediately.
+
+[End thinking]
+
+Here's a strict execution blueprint for safely decomposing the 4,000-line Java auth module into a Kotlin `auth-core` library with a thin Java adapter, **guaranteeing zero behavior changes and no breakage to 30+ call sites**. This follows proven refactoring principles (Martin Fowler, "Refactoring") and security-first practices.
+
+---
+
+### **Phase 0: Preparation (Critical Foundation)**
+*Do not skip this. All subsequent steps depend on it.*
+**Goal:** Ensure baseline stability, test coverage, and dependency mapping.
+**Time Estimate:** 2–3 days (non-negotiable)
+
+| Step | Action | Verification | Risk Mitigation |
+|------|--------|--------------|----------------|
+| **1. Audit & Document** | - Create a full dependency map of `LegacyAuth.java` (all fields, methods, statics, inner classes)<br>- List all 30+ call sites and their exact usage patterns<br>- Identify all external dependencies (DB, network, config, security providers) | - Dependency map validated by 2 engineers<br>- Call site inventory signed off by all team leads | **Risk: Hidden dependencies**<br>• Mitigation: Use IntelliJ "Analyze Dependencies" + manual review of `import` statements |
+| **2. Achieve 100% Test Coverage** | - Write unit/integration tests for **every public method** in `LegacyAuth.java`<br>- Cover all edge cases (nulls, invalid tokens, timeout scenarios)<br>- Ensure tests run in CI/CD pipeline | - All tests pass locally and in CI<br>- Code coverage report = 100% on public methods<br>- Test suite executes in <5 mins | **Risk: Unverified logic**<br>• Mitigation: If tests are missing, **do not proceed**. Write them first. Use Mockito for mocks. |
+| **3. Add Null Safety Annotations** | - In `LegacyAuth.java`, annotate all parameters/returns with `@Nullable`/`@NonNull` (using JSR-305)<br>- Fix any existing `NullPointerException` hotspots | - Static analysis (e.g., SpotBugs) reports 0 nullability warnings<br>- All tests pass with `-Xlint:nullness` | **Risk: Kotlin null safety breakage**<br>• Mitigation: Java-to-Kotlin interop fails silently for nulls. Annotations are mandatory. |
+| **4. Isolate State** | - Refactor `LegacyAuth` to move all mutable state into isolated classes (e.g., `AuthState.java`)<br>- Make core methods pure functions where possible | - All unit tests pass<br>- `LegacyAuth` instance is immutable after construction | **Risk: Concurrent state issues**<br>• Mitigation: State isolation prevents side effects during extraction |
+
+---
+
+### **Phase 1: Extract Pure Utilities (Lowest Risk)**
+*Start with stateless, deterministic code. No external dependencies.*
+**Goal:** Build confidence with safe, testable chunks.
+**Time Estimate:** 1–2 days
+
+| Step | Action | Verification | Risk Mitigation |
+|------|--------|--------------|----------------|
+| **1. Identify Extractables** | - Find pure functions (e.g., `validateTokenFormat()`, `parseJwtHeader()`, string sanitization)<br>- Ensure they have no side effects, no state access | - Code review confirms "pure" status<br>- No references to fields/external services | **Risk: Accidental state mutation**<br>• Mitigation: Use `final` on parameters in Java; Kotlin compiler enforces immutability |
+| **2. Create Kotlin Core Skeleton** | - In `auth-core` module, create `Utils.kt`<br>- Copy method implementation to Kotlin<br>- Preserve exact signature (parameter order, return types) | - Kotlin code compiles with `@JvmStatic` for static methods<br>- Java tests still pass when calling new Kotlin method | **Risk: Signature mismatch**<br>• Mitigation: Use `@JvmOverloads` only if Java callsites use defaults (avoid if possible) |
+| **3. Delegate in LegacyAuth** | - In `LegacyAuth.java`, replace the original implementation with: `return Utils.kotlinMethod(...)` | - All tests pass<br>- No new warnings in IDE<br>- Runtime logs confirm delegate flow | **Risk: Silent nullability failure**<br>• Mitigation: Add `@JvmDefault` to Kotlin methods; verify null checks via test failures |
+
+---
+
+### **Phase 2: Extract Configuration & Data Structures**
+*Move config objects and data classes. No business logic.*
+**Time Estimate:** 1 day
+
+| Step | Action | Verification | Risk Mitigation |
+|------|--------|--------------|----------------|
+| **1. Extract Data Classes** | - Move all DTOs (e.g., `AuthToken`, `UserClaims`) to `auth-core` as Kotlin data classes<br>- Keep Java equivalents in `LegacyAuth` as thin wrappers | - Kotlin classes use `@JvmRecord` for Java interop<br>- Tests verify serialization/deserialization | **Risk: Serialization breaks**<br>• Mitigation: Use `kotlinx.serialization` with identical field names; test JSON round-trip |
+| **2. Extract Config Handling** | - Move config parsing (e.g., `loadConfigFromEnv()`) to `auth-core`<br>- Keep Java config interface in `LegacyAuth` as delegate | - Config values match exactly before/after<br>- Tests cover all env var combinations | **Risk: Missing default values**<br>• Mitigation: Explicitly define defaults in Kotlin; validate against Java defaults |
+
+---
+
+### **Phase 3: Extract Core Logic (Token Verification/Generation)**
+*High-risk due to security implications. Requires rigorous testing.*
+**Time Estimate:** 3–5 days
+
+| Step | Action | Verification | Risk Mitigation |
+|------|--------|--------------|----------------|
+| **1. Isolate Dependencies** | - Refactor `LegacyAuth` to inject dependencies (e.g., `JwtProvider`, `CryptoService`) via constructors<br>- Create mock implementations for tests | - Unit tests pass with mocks<br>- No direct calls to static security libraries | **Risk: Cryptographic side effects**<br>• Mitigation: Use test doubles for crypto; validate with real-world token samples |
+| **2. Move Core Logic to Kotlin** | - Extract verification/generation methods to `auth-core`<br>- Ensure all dependencies are passed explicitly<br>- Use `@JvmName` for Java-compatible method names | - Tests cover:<br>  • Valid/invalid tokens<br>  • Signature expiry<br>  • Algorithm mismatches<br>  • Edge cases (empty claims, malformed JWTs) | **Risk: Security vulnerability**<br>• Mitigation: Run OWASP ZAP scans on test tokens; verify against known CVEs |
+| **3. Validate Behaviorally** | - Compare output of old vs. new logic with identical inputs<br>- Use `assertEquals()` on byte arrays for crypto ops<br>- Test 100+ real-world token samples from production logs | - Output matches 100% for all test cases<br>- No differences in exception types/messages | **Risk: Silent algorithm change**<br>• Mitigation: Audit JWT library versions; ensure identical JWK handling |
+
+---
+
+### **Phase 4: Extract External Service Calls (Highest Risk)**
+*Network/DB calls. Requires isolation and monitoring.*
+**Time Estimate:** 4–7 days
+
+| Step | Action | Verification | Risk Mitigation |
+|------|--------|--------------|----------------|
+| **1. Create Adapter Interfaces** | - Define Java interfaces in `LegacyAuth` for all external calls (e.g., `LdapService`, `DbTokenStore`)<br>- Implement them with no-op stubs | - All tests pass with stubs<br>- No new dependencies injected | **Risk: Broken network paths**<br>• Mitigation: Use WireMock for HTTP; test DB with H2 in-memory |
+| **2. Move Service Logic to Kotlin** | - Implement interfaces in `auth-core`<br>- Keep Java adapter as thin pass-through<br>- Add circuit breakers for network calls | - Tests cover:<br>  • Network timeouts<br>  • Service failures (4xx/5xx)<br>  • Retry logic<br>  • Rate limiting | **Risk: Production outage**<br>• Mitigation: Run in staging with real services; monitor metrics (latency, error rates) |
+| **3. Validate End-to-End** | - Run full integration tests against staging environment<br>- Compare auth flow results against production logs<br>- Verify all 30+ call sites work identically | - All call sites pass in staging<br>- No new errors in logs<br>- Metrics match pre-refactor baselines | **Risk: Undetected race conditions**<br>• Mitigation: Stress test with Gatling/JMeter; verify thread safety |
+
+---
+
+### **Phase 5: Final Cleanup & Deployment**
+*No new logic. Only structural changes.*
+**Time Estimate:** 1 day
+
+| Step | Action | Verification | Risk Mitigation |
+|------|--------|--------------|----------------|
+| **1. Remove Legacy Implementation** | - In `LegacyAuth.java`, delete all method bodies<br>- Replace with direct calls to `auth-core`<br>- Rename `LegacyAuth` → `AuthAdapter` (optional) | - All tests pass<br>- `git diff` shows only delegate calls<br>- No new warnings in build | **Risk: Accidental logic loss**<br>• Mitigation: Run `git diff --check` for whitespace; verify all methods still exist |
+| **2. Deploy Gradual Rollout** | - Deploy to 1% of production traffic<br>- Monitor error rates, latency, and auth success/failure metrics<br>- Compare against pre-refactor baselines | - Error rate ≤ 0.1%<br>- P99 latency within 5% of baseline<br>- Zero security incidents | **Risk: Undetected regression**<br>• Mitigation: Use feature flags; rollback within 5 mins if errors spike |
+| **3. Final Sign-off** | - Confirm all 30+ call sites work in production<br>- Audit Kotlin-Java interop (e.g., `@JvmStatic` for statics, nullability)<br>- Document new architecture for future maintainers | - All teams confirm functionality<br>- Security team approves audit report<br>- Documentation updated in Confluence | **Risk: Technical debt**<br>• Mitigation: Schedule 1-day "cleanup sprint" for Kotlin idioms (e.g., replace `List` with `ImmutableList`) |
+
+---
+
+### **Critical Risks & How to Mitigate**
+| Risk | Why It Matters | Mitigation Strategy |
+|------|---------------|---------------------|
+| **Null Safety Violations** | Kotlin crashes on Java `null` → 500 errors in production | • Add `@Nullable`/`@NonNull` to **all** Java code before extraction<br>• Use `kotlin-reflect` to validate interop at build time |
+| **Static Method Breakage** | Kotlin companion objects break Java `static` calls | • Keep statics in Java adapter; delegate to Kotlin instance methods<br>• Use `@JvmStatic` on Kotlin companion functions |
+| **Concurrency Bugs** | Shared mutable state in Java → race conditions in Kotlin | • Extract all state into immutable data classes<br>• Use Kotlin `val` for all fields; avoid `var` |
+| **Library Version Mismatches** | New Kotlin libraries (e.g., KotlinX) conflict with Java deps | • Pin exact versions in `build.gradle`; test dependency tree with `./gradlew dependencies` |
+| **Call Site Breakage** | 30+ teams depend on exact method signatures | • Never change parameter order, nullability, or exception types<br>• Use `@Deprecated` for any signature changes (even temporary) |
+
+---
+
+### **Why This Order?**
+1. **Pure utilities first**: Lowest risk; builds team confidence.
+2. **Data/config next**: Easy to verify with unit tests; no side effects.
+3. **Core logic after**: Security-critical, but isolated dependencies make testing feasible.
+4. **External services last**: Highest risk; requires staging environment validation.
+
+**Golden Rule**: After **every single extraction step**, run **all 30+ call site tests** in a pre-production environment. If any test fails, revert and investigate immediately. Never proceed with unverified changes.
+
+> 💡 **Key Insight**: The Java adapter *is* the public contract. It must remain unchanged until the very end. All extraction happens via delegation — no direct modifications to call sites. This is a "bridge pattern" refactoring, not a rewrite.
+
+[ Prompt: 234.6 t/s | Generation: 56.2 t/s ]

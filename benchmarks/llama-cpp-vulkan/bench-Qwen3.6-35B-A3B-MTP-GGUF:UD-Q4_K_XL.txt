@@ -1,0 +1,15 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-bench \
+  -hf unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_XL \
+  -ngl 99 -p 1024 -n 2048
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon 8060S Graphics (RADV STRIX_HALO) (radv) | uma: 1 | fp16: dot2 | bf16: 0 | warp size: 64 | shared memory: 65536 | int dot: 1 | matrix cores: KHR_coopmat
+load_backend: loaded Vulkan backend from /nix/store/mqq37s52wv4z59wa4g5gccij5iacjawp-llama-cpp-9608/bin/libggml-vulkan.so
+load_backend: loaded CPU backend from /nix/store/mqq37s52wv4z59wa4g5gccij5iacjawp-llama-cpp-9608/bin/libggml-cpu-zen4.so
+Downloading Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf ──────────────────────── 100%
+| model                          |       size |     params | backend    | ngl |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q4_K - Medium |  21.27 GiB |    35.51 B | Vulkan     |  99 |          pp1024 |       1105.58 ± 7.34 |
+| qwen35moe 35B.A3B Q4_K - Medium |  21.27 GiB |    35.51 B | Vulkan     |  99 |          tg2048 |         59.67 ± 0.02 |
+
+build: 70b54e1 (9608)

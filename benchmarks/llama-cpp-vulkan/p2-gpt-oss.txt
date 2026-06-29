@@ -1,0 +1,311 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-cli \
+  -hf ggml-org/gpt-oss-120b-GGUF \
+  --jinja -ngl 99 -fa 1 -c 40960 \
+  --temp 1.0 --top-p 1.0 \
+  --chat-template-kwargs '{"reasoning_effort":"high"}' \
+  -no-cnv \
+  -p "A 4,000-line Java module handles auth, and we're splitting it into a Kotlin auth-core library plus a thin Java adapter, with no behavior change and no break to the 30+ call sites. Produce a strict execution blueprint: the decomposition, the safe ordering of extractions, what must be verified at each step, and where the risks are."
+
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model...
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9608-70b54e1
+model      : ggml-org/gpt-oss-120b-GGUF
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> A 4,000-line Java module handles auth, and we're splitting it into a Kotlin auth-core library plus a thin Java adapter, with no behavior change and no break to the 30+ call sites. Produce a strict execution blueprint: the decomposition, the safe ordering of extractions, what must be verified at each step, and where the risks are.
+
+[Start thinking]
+We need to produce a strict execution blueprint: steps, ordering, verification, risks. Provide a structured plan for migrating a large Java module into Kotlin core lib + thin Java adapter, preserving behavior and compatibility with many call sites. Should be detailed, with decomposition, safe ordering of extractions, verification per step, risk points.
+
+Will outline phases: analysis, setup, modularization, extraction, testing, integration, release. Include code organization, build system changes (Maven/Gradle), dependency management, module boundaries, Kotlin interop, Java adapter design, incremental extraction, unit tests, integration tests, contract verification, static analysis, CI pipeline, regression testing, performance testing, code reviews, documentation, versioning.
+
+Identify risks: Kotlin interop issues (nullability, default arguments), binary compatibility, classpath conflicts, runtime exceptions, threading, reflection, serialization, annotation processing, ProGuard/R8, class loading, logging, security manager.
+
+Provide checklist for each extraction: identify cohesive unit, write Kotlin version, add unit tests, ensure same signatures, verify with tests, run integration tests, check coverage, check compatibility with downstream.
+
+Define ordering: start with pure data classes and value objects, then utility functions, then service interfaces, then implementations, then adapters.
+
+Include verification steps: compile-time checks, static analysis (detekt, SpotBugs), contract tests, mutation testing, property-based testing, smoke tests.
+
+Provide risk mitigation: feature flags, canary releases, fallback to original Java module, versioning, separate artifact, backward compatibility.
+
+Will produce blueprint with sections: Overview, Prerequisites, Phase 0: Baseline, Phase 1: Project Setup, Phase 2: Extraction Roadmap, Phase 3: Extraction Steps (with substeps), Phase 4: Integration and Adapter, Phase 5: Validation Suite, Phase 6: Rollout.
+
+Will include a table summarizing steps, verification, risk.
+
+Will give guidelines for naming, packaging, build.
+
+Will advise on using Gradle Kotlin DSL, enabling Kotlin incremental compilation, configuring Java/Kotlin interop.
+
+Will mention to keep 30+ call sites unchanged: ensure same public API (class names, method signatures) via adapter.
+
+Will also mention documentation, release notes.
+
+Let's craft final answer.
+[End thinking]
+
+# Execution Blueprint
+**Goal** – Move a 4 000‑line monolithic Java authentication module into a **Kotlin `auth‑core` library** plus a **thin Java adapter** while keeping **exactly the same runtime behaviour** and **no changes to any of the 30 + existing call‑sites**.
+
+The blueprint is written as a **step‑by‑step, verifiable plan** that can be copied into a JIRA epic or a Confluence checklist.
+Every phase has:
+
+* **What to do** (concrete actions)
+* **How to verify** (tests, static checks, metrics)
+* **Key risks** (what can break)
+* **Gate** – “don’t proceed until the verification passes”.
+
+---
+
+## 1️⃣ PRE‑REQUISITES
+
+| Item | Details | Owner |
+|------|---------|-------|
+| **Version‑control strategy** | Create a dedicated feature branch `feat/kotlin-auth-core` from `main`. Protect `main` with PR reviews only. | SCM Lead |
+| **Build system** | Ensure the project can build **both** a Java‑only artifact *and* a Kotlin‑enabled artifact. Add the Kotlin Gradle plugin (or Maven `kotlin-maven-plugin`) on the feature branch. | Build Engineer |
+| **CI pipeline** | Add a *parallel* job that builds the Kotlin module and runs all existing tests. Make it a *required* status check. | CI Engineer |
+| **Baseline test suite** | Run the full unit, integration, contract, and performance suites. Capture **baseline numbers** (test pass %; coverage; response‑time percentiles). Store in CI artifacts. | QA |
+| **Static analysis baseline** | Run SpotBugs, Checkstyle, PMD (Java) and Detekt (Kotlin) on the current code. Export the reports. | QA |
+| **Documentation of public API** | Export the current Java module’s public types and method signatures (e.g., via Javadoc `-doclet` or `javap -public`). This will be the contract for the adapter. | Architect |
+| **Feature flag** | If the product already uses a flag system (e.g., Togglz, LaunchDarkly), add a temporary flag `useKotlinAuthCore` that defaults **off**. | Platform Engineer |
+| **Rollback plan** | Ability to switch the class‑path back to the original JAR in one deployment. Document the exact version numbers. | Release Manager |
+
+> **Gate 0** – All pre‑reqs must be completed and baseline artefacts stored before any code moves.
+
+---
+
+## 2️⃣ HIGH‑LEVEL DECOMPOSITION
+
+| Layer | Responsibility | Current Location (Java) | Target (Kotlin) | Adapter Role |
+|-------|----------------|--------------------------|------------------|--------------|
+| **Domain / Value Objects** | Immutable data carriers (e.g., `UserId`, `Token`, `AuthResult`). | Mixed throughout the file. | Pure Kotlin `data class`es. | Expose Java constructors / static factories that delegate to Kotlin. |
+| **Utilities / Helpers** | String sanitisation, date handling, crypto wrappers. | Static methods. | Kotlin `object`s or top‑level functions. | Java static wrappers that call the Kotlin functions. |
+| **Service Interfaces** | `Authenticator`, `TokenProvider`, `CredentialValidator`. | Java interfaces. | Kotlin `interface`s (same JVM signatures). | Extend / implement the Kotlin interface in Java, delegating calls. |
+| **Implementations** | `DefaultAuthenticator`, `JwtTokenProvider`, `LdapCredentialValidator`. | Concrete classes. | Kotlin `class`es (internal visibility where possible). | Java adapters that expose the original class names, delegate to Kotlin implementations. |
+| **Exception hierarchy** | `AuthException`, `InvalidCredentialsException`. | Java checked/unchecked. | Kotlin `class`es (must stay unchecked to keep binary compatibility). | Java subclasses that simply inherit the Kotlin ones (or re‑export). |
+| **Configuration** | `AuthConfig` (properties, builder). | Java POJO + Builder. | Kotlin `data class` + companion builder. | Java builder that forwards to Kotlin constructor. |
+
+**Why this order?**
+- **Value objects** have no side‑effects → safest to move first.
+- **Utilities** are pure functions → easy to test in isolation.
+- **Interfaces** are contracts only → moving them does not affect runtime.
+- **Implementations** hold the business logic – moved last after the contract is stable.
+
+---
+
+## 3️⃣ SAFE EXTRACTION ORDER
+
+The extraction proceeds **incrementally**. After each extraction you **run the full test suite** and **verify the public contract**. If any step fails, you revert, fix, and repeat.
+
+| Step | What to Extract | How to Extract | Verification | Risks |
+|------|----------------|----------------|--------------|-------|
+| **3.1** | **Package skeleton** – create `auth-core` Gradle module (or Maven sub‑module). Add `kotlin("jvm")` plugin, set `java.sourceCompatibility = 1.8` (or current). | `git mv src/main/java/com/.../Auth.java auth-core/src/main/kotlin/com/.../Auth.kt` (empty stub). | `./gradlew :auth-core:compileKotlin` succeeds. | Build break (classpath, plugin mis‑config). |
+| **3.2** | **Value objects** – move each POJO to a Kotlin `data class`. Keep the original Java class as a thin wrapper that **extends** the Kotlin class (or contains a delegate). | Example: `UserId.java` → `UserId.kt` (`@JvmInline value class UserId(val id: String)`). Keep `UserId.java` with `public class UserId extends UserIdKt {}`. | *Compile‑time*: `javac` can still compile the old Java wrapper. <br>*Runtime*: instantiate via Java, `instanceof` works. <br>*Test*: all unit tests that construct these objects still pass. | Nullability mismatches → NPEs. <br>Binary compatibility of inline/value classes (must stay `public`). |
+| **3.3** | **Utility functions** – move each static method to a Kotlin top‑level function or `object`. Keep a Java class with static forwarding methods. | `StringUtils.trim(String s)` → `fun String.trimmed(): String = this.trim()`; `StringUtils.java` → `public static String trim(String s) { return StringUtilsKt.trim(s); }`. | *Static analysis*: Detekt passes. <br>*JUnit*: Run all tests that hit the utility. | Kotlin `@JvmStatic` forgetting → No method generated → NoClassDefFoundError. |
+| **3.4** | **Exception hierarchy** – rewrite as Kotlin `class`s, keep `java` stubs extending them. | `class AuthException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)`. `AuthException.java` → `public class AuthException extends AuthExceptionKt {}`. | *Throwable check*: `catch (AuthException e)` still works. <br>*Tests*: any test expecting specific exception class passes. | Checked‑exception semantics change (Kotlin always unchecked). Must keep original `extends Exception` if it was checked. |
+| **3.5** | **Configuration POJOs** – move to Kotlin data class with `@JvmOverloads` constructor. Add a Java builder that delegates. | `data class AuthConfig(val timeoutMs: Long = 3000, val issuer: String)`; `AuthConfigBuilder.java` → calls `new AuthConfig(timeoutMs, issuer)`. | *JSON/YAML deserialization*: Verify existing deserialisers (Jackson) still produce the same object (add `@JsonCreator`). <br>*Integration tests*: config loading passes. | Jackson Kotlin module missing → fields not bound. |
+| **3.6** | **Service Interfaces** – copy to Kotlin unchanged. Add `@JvmDefault` where default methods existed. Keep Java interfaces that **extend** the Kotlin ones (no extra methods). | `interface Authenticator { fun authenticate(req: AuthRequest): AuthResult }` <br>`Authenticator.java` → `public interface Authenticator extends AuthenticatorKt {}` | *Compile*: Java code that implements the interface still compiles. <br>*Tests*: Mocking frameworks (Mockito) can still proxy the interface. | Default methods: need `kotlinOptions { jvmTarget = "1.8" }` + `-Xjvm-default=all`. |
+| **3.7** | **Implementation Classes** – move **one class at a time**. For each: <br>1. Create Kotlin version (same package, same class name). <br>2. Keep a Java *adapter* class with the *original* name that **delegates** to the Kotlin class via composition (or inheritance). | `class DefaultAuthenticator : Authenticator { … }` <br>`DefaultAuthenticatorAdapter.java` → `public class DefaultAuthenticator implements Authenticator { private final DefaultAuthenticator delegate = new DefaultAuthenticator(); public AuthResult authenticate(AuthRequest r) { return delegate.authenticate(r); } }` | *All unit tests* for that class run against the Java adapter. <br>*Integration tests* that call the original name (`new DefaultAuthenticator()`) still hit the delegate. | State leakage: static fields in original class must be migrated to Kotlin `companion object` with `@JvmStatic`. <br>Reflection: code that does `Class.forName("com.foo.DefaultAuthenticator")` still works (adapter present). |
+| **3.8** | **Dependency Injection bindings** – update the DI container (Spring, Guice, Dagger) to bind the **Java adapter** type (unchanged) to the **Kotlin implementation** (via `@Inject` on delegate). | In Spring XML/Java config replace bean class with `DefaultAuthenticatorAdapter`. In Kotlin implementation add `@Component` (if using Spring). | *Spring context startup* test. <br>*Smoke test*: request an auth token through the whole stack. | Bean lifecycle differences (Kotlin `init` blocks vs Java constructors). |
+| **3.9** | **Remove old Java bodies** – once a class is fully covered by Kotlin + adapter, delete the original Java body (keep only adapter). | `git rm src/main/java/com/.../DefaultAuthenticator.java` (after verifying adapter works). | *Full test suite* passes **without** any of the old bodies. | Accidentally delete a class still used elsewhere (search for direct imports). |
+| **3.10** | **Finalize the `auth-core` artifact** – publish version `1.0.0‑kotlin` to internal Maven repo. Mark it **binary compatible** (use `java -jar` `japicmp` to compare with previous JAR). | Run `./gradlew :auth-core:publish` and `japicmp` diff. | *Compatibility report* shows **no** public API changes (except added `*Adapter` classes). | If a downstream module uses reflection to access private members, compatibility breaks. |
+
+> **Gate after each Step** – run the *Full Test Suite* (unit + integration + contract + performance). If any test fails, **stop** and fix before proceeding.
+
+---
+
+## 4️⃣ VERIFICATION SUITE
+
+| Layer | Test Type | When to Run | Acceptance Criteria |
+|-------|-----------|-------------|---------------------|
+| **Unit** | Existing JUnit/TestNG + new tests for Kotlin code (use `kotlin-test` or `JUnit5`). | After every extraction step. | **100 %** of pre‑existing unit tests pass; new Kotlin units have **≥ 80 %** line coverage. |
+| **Static type checks** | Detekt (Kotlin), SpotBugs/PMD (Java). | After each module compile. | No new violations of *null‑safety*, *unused* or *dead code*. |
+| **Contract tests** | Consumer‑driven Pact or custom `AuthContractTest` that exercises the public API only. | After each public type is migrated (interfaces, data objects). | All contract interactions succeed. |
+| **Integration** | End‑to‑end flow (login → token → validate) using the real runtime (Spring Boot test, Docker compose). | After each implementation class migration. | Response times within **±5 %** of baseline, no error logs. |
+| **Performance** | JMH micro‑benchmarks for hot paths (e.g., token signing). | After the full core is in Kotlin. | No regression > **10 %** latency; memory footprint ≤ baseline + 5 MB. |
+| **Binary compatibility** | `japicmp` or `revapi` diff against the previous JAR. | After publishing `auth-core`. | **Zero** breaking changes to public signatures. |
+| **Mutation testing** | PIT (Java) + `pitest-kotlin` (optional). | After full migration, before release. | Mutation score ≥ 70 % (ensures tests are meaningful). |
+| **Smoke / Canary** | Deploy to a staging environment with the feature flag **ON** for a subset of traffic. | Final release candidate. | No increase in error rate, latency, or security alerts. |
+
+All verification artefacts must be uploaded as CI build artifacts and linked in the JIRA epic for auditability.
+
+---
+
+## 5️⃣ RISK MATRIX & MITIGATION
+
+| # | Risk | Where it appears | Impact | Likelihood | Mitigation |
+|---|------|-------------------|--------|------------|------------|
+| R1 | **Nullability mismatch** – Kotlin treats parameters as non‑null by default, Java callers may pass `null`. | Value objects, utility functions. | NPE at runtime. | **High** | • Annotate Kotlin parameters with `@Nullable` where needed.<br>• Add explicit `requireNotNull` checks and unit tests with null inputs.<br>• Run `nullaway` on Java code after migration. |
+| R2 | **Binary compatibility break** – downstream modules use reflection (`Class.forName`, `Method.invoke`). | Any moved class. | `NoSuchMethodError`/`ClassNotFoundException`. | **Medium** | • Keep the original **Java adapter** class name & package unchanged.<br>• Run reflection‑based integration tests (e.g., Spring’s `ClassPathScanningCandidateComponentProvider`). |
+| R3 | **Kotlin default methods** – Java code expects default implementations that Kotlin does not emit without `-Xjvm-default`. | Service interfaces with default methods. | AbstractMethodError. | **Low** | • Enable `kotlinOptions { freeCompilerArgs += "-Xjvm-default=all" }`.<br>• Add explicit `@JvmDefault` on each default method. |
+| R4 | **Serialization incompatibility** – Jackson/ Gson mapping to old POJOs. | Config objects, DTOs. | Missing fields, `InvalidDefinitionException`. | **Medium** | • Add `@JsonCreator` and `@JsonProperty` on Kotlin constructors.<br>• Keep a Java DTO wrapper if needed (delegates to Kotlin). |
+| R5 | **Dependency‑injection mismatch** – Spring proxies Java classes but not Kotlin final classes. | Implementation classes. | Bean creation failure. | **Low** | • Mark Kotlin classes as `open` (or use `kotlin-spring` plugin to make them open automatically). |
+| R6 | **Performance regression** – Kotlin generated bytecode may be slower for crypto primitives. | Crypto helpers, token signing. | Higher latency. | **Low** | • Benchmark critical paths (JMH) after each implementation migration.<br>• Keep hot‑path methods in Java if regression observed (allow mixed language). |
+| R7 | **Build‑pipeline breakage** – Gradle/Maven not configured for mixed Java/Kotlin. | Project setup. | No CI builds. | **Medium** | • Add separate source sets (`src/main/kotlin` & `src/main/java`).<br>• Verify that `clean build` works locally before pushing. |
+| R8 | **Version drift** – The Java adapter and Kotlin core get out‑of‑sync in a multi‑branch environment. | Release management. | Runtime mismatches. | **Low** | • Publish both artifacts together with the same version.<br>• Use a *bom* (Bill‑of‑Materials) to lock versions. |
+| R9 | **Testing blind spot** – Existing tests only cover happy path; hidden edge‑cases exposed by Kotlin null‑safety. | All phases. | Undetected bugs. | **Medium** | • Add *property‑based* tests (Kotlin `kotest` `property`) for key functions.<br>• Run mutation testing to surface missing branches. |
+| R10 | **Team knowledge gap** – Developers unfamiliar with Kotlin may introduce bugs in later steps. | Ongoing development. | Slower progress, quality drop. | **Medium** | • Provide a short “Kotlin for Java devs” workshop.<br>• Enforce code‑review checklist that includes “Kotlin interop sanity”. |
+
+---
+
+## 6️⃣ DETAILED STEP‑BY‑STEP PLAYBOOK
+
+Below is the **daily‑to‑weekly cadence** a team can follow. Each bullet corresponds to an **action** that should be recorded in the task board.
+
+### Phase 0 – Baseline (Day 0‑2)
+
+1. **Branch off** `main → feat/kotlin-auth-core`.
+2. **Run baseline CI** → store artefacts (test report, coverage, performance numbers).
+3. **Create `auth-core` module** (empty). Commit.
+
+### Phase 1 – Pure Data (Day 3‑7)
+
+| Day | Action |
+|-----|--------|
+| 3 | Move `UserId`, `Token`, `AuthResult` → Kotlin `data class`es. Keep Java wrappers. |
+| 4 | Add `@JvmInline` where appropriate (only if JDK 15+). |
+| 5 | Write **one new unit test** for each Kotlin data class (equality, toString). |
+| 6 | Run **full suite** – ensure 100 % pass. |
+| 7 | Publish interim version `0.1‑alpha`. Tag it. |
+
+### Phase 2 – Utilities (Day 8‑12)
+
+| Day | Action |
+|-----|--------|
+| 8 | Identify static utility classes (`StringUtils`, `CryptoUtil`). |
+| 9 | Convert each method to top‑level function; add `@JvmStatic` in companion `object` when needed. |
+|10 | Create Java forwarding class (same name). |
+|11 | Run **static analysis** (detekt) – fix any `UnusedPrivateMember` warnings. |
+|12 | Full suite + benchmark (`CryptoUtil.sign`) – verify ≤ 5 % deviation. |
+
+### Phase 3 – Exceptions & Config (Day 13‑17)
+
+| Day | Action |
+|-----|--------|
+|13| Migrate all custom exceptions to Kotlin, keeping inheritance. |
+|14| Add Java stub that extends the Kotlin class (no code). |
+|15| Migrate `AuthConfig` → Kotlin data class with `@JvmOverloads`. |
+|16| Update Jackson module (`jackson-module-kotlin`) in `build.gradle`. |
+|17| Run **integration tests** that deserialize config files. |
+
+### Phase 4 – Service Interfaces (Day 18‑22)
+
+| Day | Action |
+|-----|--------|
+|18| Copy each Java interface to Kotlin (`interface Authenticator`). |
+|19| Add `@JvmDefault` where default methods existed. |
+|20| Create a Java interface that `extends` the Kotlin one (no methods). |
+|21| Run **Mockito**‑based tests that mock the interfaces – they must still compile. |
+|22| Verify binary compatibility with `japicmp`. |
+
+### Phase 5 – Implementation Migration (Day 23‑45) – *Iterative*
+
+For each implementation class (e.g., `DefaultAuthenticator`):
+
+| Sub‑step | Action |
+|----------|--------|
+| **a** | Create Kotlin class `DefaultAuthenticator` implementing the Kotlin `Authenticator`. |
+| **b** | Add a **Java adapter** `DefaultAuthenticatorAdapter` that implements the original Java `Authenticator` and delegates to the Kotlin class. |
+| **c** | Run **unit tests** that target the Java adapter (existing tests). |
+| **d** | Run **integration flow** that creates the bean via the original name (`new DefaultAuthenticatorAdapter()`). |
+| **e** | Run **performance micro‑benchmark** for the critical path. |
+| **f** | If all pass, **delete** the original Java implementation file (keep only adapter). |
+| **g** | Commit, push, and **run full CI**. |
+| **h** | Tag the commit with `impl‑<classname>`.
+
+Repeat for each class. Estimate **2‑3 days per class** (depends on size). Prioritise the most‑used classes first (auth entry‑point, token provider).
+
+### Phase 6 – DI & Application Wiring (Day 46‑50)
+
+| Day | Action |
+|-----|--------|
+|46| Update Spring/Guice modules to bind the **adapter** classes (same bean names). |
+|47| Run **context load test** (`ApplicationContext` starts). |
+|48| Verify **feature flag** `useKotlinAuthCore` toggles between old JAR and new `auth-core` JAR (both on classpath). |
+|49| Smoke‑test on **staging** with flag **ON** for 5 % traffic. |
+|50| Collect logs, error rates, latency. If any regression > 5 %, rollback flag and investigate. |
+
+### Phase 7 – Final Clean‑Up & Release (Day 51‑55)
+
+| Day | Action |
+|-----|--------|
+|51| Run **mutation testing** on the entire module. |
+|52| Run **japicmp** against the previous release JAR – confirm *no* breaking changes. |
+|53| Update **README**, **Javadoc** (KDoc → Javadoc via `dokka`), and **migration guide** (should be empty). |
+|54| Publish **auth-core‑1.0.0‑kotlin** to internal Maven with **pom** that declares `java.version=1.8`. |
+|55| Create **release ticket** – flip the feature flag to ON for 100 % production. Perform a **post‑release health check** (SLA, security alerts). |
+
+---
+
+## 7️⃣ QUICK‑REFERENCE CHECKLIST (Copy‑Paste)
+
+```
+[ ] Baseline artefacts captured (tests, perf, static analysis)
+[ ] auth-core module created, Kotlin plugin applied
+[ ] Value objects migrated + Java wrappers
+[ ] Utilities migrated + @JvmStatic forwarders
+[ ] Exceptions migrated, Java stubs kept
+[ ] Config POJO migrated, Jackson module added
+[ ] Service interfaces migrated, @JvmDefault enabled
+[ ] For each implementation:
+    [ ] Kotlin class written
+    [ ] Java adapter created (same name)
+    [ ] Unit & integration tests pass
+    [ ] Performance benchmark OK
+    [ ] Original Java impl removed
+[ ] DI bindings updated to adapters
+[ ] Feature flag added, default OFF
+[ ] Full CI suite passes after each step
+[ ] Binary compatibility (japicmp) shows no breaking changes
+[ ] Mutation testing score ≥70%
+[ ] Staging canary with flag ON passes health checks
+[ ] Release artefact published, flag switched ON prod
+[ ] Post‑release monitoring confirms zero regressions
+```
+
+---
+
+## 8️⃣ WHAT TO DO IF A GATE FAILS
+
+| Gate | Typical failure | Immediate action |
+|------|----------------|------------------|
+| **Compile** | Kotlin code not generating expected JVM signatures. | Run `javap -classpath build/libs/auth-core.jar <class>` to inspect. Add `@JvmName`, `@JvmStatic`, or `@JvmOverloads`. |
+| **Unit** | A test that constructs a value object now NPEs. | Verify nullability annotations; add explicit `requireNotNull` guard. |
+| **Integration** | Spring fails to autowire a bean. | Ensure Kotlin class is `open` or enable `kotlin-spring`. |
+| **Performance** | Latency > 10 % for token signing. | Profile with JFR; consider keeping that method in Java or using `@JvmInline` for value class. |
+| **Binary compatibility** | `ClassNotFoundException` for an old class name. | Keep a **thin Java delegator** with the original fully‑qualified name. |
+| **Canary** | Error‑rate spikes after flag ON. | Roll back flag, investigate logs, add additional null‑checks, re‑run the failing test locally. |
+
+---
+
+## 9️⃣ FINAL NOTES
+
+* **Never delete a public class name** until the Java adapter for that name is in place and covered by tests.
+* **Keep the Kotlin core **internal** to the module** – only expose the adapter’s API to the rest of the system.
+* **Version the whole library** (e.g., `1.0.0`) *once* the migration is complete; treat the Kotlin refactor as a **non‑breaking** change.
+* **Document the adapter pattern** (one‑line Javadoc on each adapter: “Legacy entry‑point delegating to Kotlin implementation”). Future developers will know why the duplicate class exists.
+
+By following the ordered extraction, the verification gates, and the risk mitigations outlined above, you can ship the Kotlin `auth‑core` library with **zero functional change**, **no breakage of existing call sites**, and **full confidence** that the new code is as safe, performant, and maintainable as the original Java monolith. Good luck!
+
+[ Prompt: 192.4 t/s | Generation: 50.1 t/s ]

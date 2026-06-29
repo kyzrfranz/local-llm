@@ -1,0 +1,206 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-cli \
+  -hf ggml-org/gpt-oss-120b-GGUF \
+  --jinja -ngl 99 -fa 1 -c 40960 \
+  --temp 1.0 --top-p 1.0 \
+  --chat-template-kwargs '{"reasoning_effort":"high"}' \
+  -no-cnv \
+  -p "A coding agent applied a patch, the test suite now hangs instead of failing, and the only signal is that one new integration test never returns. Produce a strict diagnostic blueprint: the ordered hypotheses to check, how to isolate a hang from a failure, and the decision tree for where to look first."
+
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model...
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9608-70b54e1
+model      : ggml-org/gpt-oss-120b-GGUF
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> A coding agent applied a patch, the test suite now hangs instead of failing, and the only signal is that one new integration test never returns. Produce a strict diagnostic blueprint: the ordered hypotheses to check, how to isolate a hang from a failure, and the decision tree for where to look first.
+
+[Start thinking]
+We need to produce a "strict diagnostic blueprint" for a situation where a patch introduced a hanging integration test. Need ordered hypotheses, how to isolate a hang from a failure, decision tree for where to look first.
+
+So produce a structured document: sections: Overview, Preliminaries, Hypotheses (list), Isolation steps, Decision tree (maybe flowchart description). Also include tooling suggestions: logs, timeouts, instrumentation, strace, gdb, etc. Emphasize checking deadlocks, infinite loops, external resource blocking, network calls, DB connections, race conditions. Also check test harness changes, environment changes, flaky resources. Provide steps: reproduce locally, run with -vv, add timeouts, use strace, use thread dump, etc.
+
+Make it strict: ordered, numbered steps, clear criteria.
+
+Will output in markdown with headings, tables, flow diagram using mermaid. Ensure clarity.
+[End thinking]
+
+## Diagnostic Blueprint – “New Integration Test Never Returns”
+
+> **Goal** – Turn a *silent hang* into a concrete root‑cause (dead‑lock, infinite loop, external block, etc.) and locate the offending code change as quickly as possible.
+> **Scope** – The failure appears only after a recent patch; the test suite runs to completion otherwise.
+
+---
+
+### 1️⃣ Pre‑flight Checklist (Never skip)
+
+| # | Item | Why it matters | Pass / Fail |
+|---|------|----------------|-------------|
+| 1 | **Re‑run the whole suite on a clean checkout** (no local modifications, clean `node_modules` / `venv` / `target`). | Guarantees the hang is reproducible and not a stray artefact. | |
+| 2 | **Confirm the same test hangs on at least two environments** (e.g., local Linux VM and CI runner). | Rules out environment‑specific flakiness (e.g., missing service). | |
+| 3 | **Run only the problematic test in isolation** (`pytest -k test_name -vv`, `go test -run TestName`, etc.). | Isolates the hang from interference of other tests. | |
+| 4 | **Check the test’s timeout configuration** (default, per‑test, CI). | If the timeout is too generous you may be waiting unnecessarily. | |
+| 5 | **Record the exact git hash before and after the patch**. | You’ll need a “good” and “bad” commit for binary search. | |
+
+> **If any of the above fails** – fix the environment issue first. Only then proceed to the hypothesis ladder.
+
+---
+
+## 2️⃣ Ordered Hypotheses (from most likely → hardest to verify)
+
+| # | Hypothesis | Typical Symptoms | Quick “smell” test |
+|---|------------|------------------|--------------------|
+| 1 | **Patch introduced a blocking call** (e.g., `await`, `select`, `recv`, DB query, HTTP request) that never returns. | Test stalls at the same line each run; CPU stays low. | Add a **debug‑print** or **log** before/after the suspected call; see if the “after” never appears. |
+| 2 | **Dead‑lock / race condition** introduced (multiple goroutines/threads waiting on each other). | CPU may spike, or stay flat; no progress in logs. | Enable **thread dump** / **stack trace** after a timeout (e.g., `kill -SIGQUIT <pid>` for Java, `Ctrl+\` for Go, `pstack` for C). |
+| 3 | **External resource unavailable** (service, DB, message broker) because the patch changed endpoint, auth, or schema. | Network‑related syscalls block; often only the integration test touches the resource. | Run the same request manually (cURL / psql) from the test container. |
+| 4 | **Infinite loop / recursion** introduced (logic error, missing break condition). | CPU at 100 % on a single core; logs may flood. | Observe CPU usage; add a **watchdog timer** (`timeout 30s <cmd>`) to see if it ends early. |
+| 5 | **Test harness / fixture mis‑configuration** (fixture never tears down, server stays bound, global state persists). | Test passes on first run but hangs on subsequent runs, or vice‑versa. | Reset the fixture manually before running the test. |
+| 6 | **Side‑effect from other tests** (order‑dependent failure) – the new test depends on a global that the patch altered. | Only fails when run after a particular suite; passes in isolation. | Shuffle test order (`pytest --shuffle`) or run the suite with `--maxfail=1` and watch the order. |
+| 7 | **Compiler / optimizer bug** (rare, usually language‑specific). | Same source works in debug but hangs in optimized build. | Re‑compile with `-O0` / `debug` flags. |
+| 8 | **Resource leak (FD, socket, thread)** that exhausts a limit after the patch. | After many tests the new test hangs; earlier tests succeed. | Check `ulimit -n`, `ulimit -u`; run `lsof`/`ps` before the hang. |
+
+> **Proceed down the list**. As soon as a hypothesis is confirmed, stop – you have the root cause.
+
+---
+
+## 3️⃣ How to Isolate a Hang **From** a Failure
+
+| Step | Action | Tooling | Expected Outcome |
+|------|--------|---------|-------------------|
+| 3.1 | **Add a hard timeout** around the test (e.g., `timeout 60s pytest ...`). | `timeout`, `pytest-timeout`, `go test -run TestName -timeout 60s` | If the suite aborts with “Timed out after 60s”, you know it’s a hang, not a failing assertion. |
+| 3.2 | **Capture a live stack trace** at the moment of the timeout. | `kill -SIGQUIT <pid>` (Java), `gdb -p <pid> -ex "thread apply all bt"` (C/C++), `pstack <pid>` (Linux), `Ctrl+\\` (Go), `python -c "import faulthandler, sys; faulthandler.dump_traceback(open('trace.log','w'))"` (Python) | The trace shows where threads are stuck. |
+| 3.3 | **Record syscalls** for the test process. | `strace -tt -f -p <pid> -o strace.log` (Linux), `dtruss` (macOS), `procmon` (Windows) | Look for a call that never returns (e.g., `read()`, `select()`, `recvmsg()`). |
+| 3.4 | **Enable verbose logging** at the application level (increase log level to DEBUG). | Logback, logrus, `env LOG_LEVEL=debug`, etc. | The last log line before the hang points to the suspect code path. |
+| 3.5 | **Run the test under a deterministic scheduler** (e.g., `go test -run TestName -race -count=1 -shuffle=on`, `python -m pytest --forked`). | Detect race‑related dead‑locks. | If the hang disappears under a deterministic schedule, it’s a race. |
+| 3.6 | **Replace the real external services with fakes/mocks** (if possible). | WireMock, Testcontainers, `unittest.mock`, `gomock`. | If the hang disappears, the external resource is the blocker. |
+
+---
+
+## 4️⃣ Decision Tree – Where to Look First
+
+```mermaid
+flowchart TD
+    A[Start: New test never returns] --> B{Does the test log progress?}
+    B -->|Yes| C[Locate last log line]
+    C --> D{Is the last line before a network/DB call?}
+    D -->|Yes| E[Check external resource (ping, curl, psql)]
+    E -->|OK| F[Add timeout around the call; look for retry loop]
+    F -->|Hang persists| G[Capture strace / thread dump]
+    D -->|No| H[Is the last line before a lock acquire?]
+    H -->|Yes| I[Dump stacks → look for dead‑lock]
+    H -->|No| J[Check for infinite loop (CPU 100%?)]
+
+    B -->|No| K[Add DEBUG logging + timeout]
+    K --> L{CPU spikes?}
+    L -->|Yes| M[Infinite loop / recursion → add watchdog]
+    L -->|No| N[Hang with low CPU → likely blocking call]
+    N --> O[Run strace / gdb for blocked syscalls]
+
+    G --> P{All threads blocked on same mutex?}
+    P -->|Yes| Q[Dead‑lock – examine lock order in recent patch]
+    P -->|No| R[Blocked on I/O – revisit hypothesis 1/3]
+
+    style A fill:#ffeb3b,stroke:#333,stroke-width:2px
+    style Q fill:#ff7043,stroke:#333,stroke-width:2px
+    style R fill:#ff7043,stroke:#333,stroke-width:2px
+```
+
+### How to use the tree
+
+1. **Run the test once** and glance at the log output.
+2. **Follow the “Yes/No” branches** until you hit a concrete diagnostic action (e.g., “Capture strace” or “Check external resource”).
+3. **Iterate** – if the first branch doesn’t reveal anything, backtrack to the next hypothesis in the ordered list.
+
+---
+
+## 5️⃣ Step‑by‑Step Playbook (Copy‑Paste Ready)
+
+```bash
+# 0️⃣ Checkout cleanly
+git checkout <bad-commit>
+git clean -fdx   # remove all untracked files
+./scripts/restore_deps   # npm install / pip -r ...
+
+# 1️⃣ Re‑run the failing test with a hard timeout
+timeout 45s pytest -vv -k test_my_integration
+
+# 2️⃣ If timed‑out, grab a stack trace
+PID=$(pgrep -f "pytest.*test_my_integration")
+if [ -n "$PID" ]; then
+    # Java example
+    kill -SIGQUIT $PID
+    # or generic
+    gdb -p $PID -ex "thread apply all bt" -batch > stack.txt
+    echo "=== STACK ==="
+    cat stack.txt
+fi
+
+# 3️⃣ Record syscalls (Linux)
+if [ -n "$PID" ]; then
+    strace -tt -f -p $PID -o strace.log &
+    STRACE_PID=$!
+    sleep 45   # let it run until timeout
+    kill $STRACE_PID
+    grep -E "read|recv|select|poll|connect|accept|write" strace.log | tail
+fi
+
+# 4️⃣ Quick external‑resource sanity check
+curl -v http://localhost:8080/health || echo "Health endpoint unreachable"
+
+# 5️⃣ If still unclear → enable verbose app logging
+export LOG_LEVEL=debug
+pytest -vv -k test_my_integration
+
+# 6️⃣ If you suspect dead‑lock, run under a deterministic scheduler (Go)
+go test -run TestMyIntegration -count=1 -shuffle=on -race
+
+# 7️⃣ When you locate the suspect line, add a watchdog
+python -c 'import signal,sys; signal.alarm(30); import my_module; sys.exit(my_module.run())'
+```
+
+---
+
+## 6️⃣ Post‑Investigation Checklist
+
+| ✅ | Item |
+|----|------|
+| 1 | **Root cause documented** (e.g., “blocking DB query without timeout after schema change”). |
+| 2 | **Patch fixed** (add timeout, correct lock order, mock external service, etc.). |
+| 3 | **Test restored** – run full suite on both good & bad commits to confirm regression is gone. |
+| 4 | **Add a regression guard** (e.g., a per‑test timeout lower than CI timeout, a unit test that ensures the call returns). |
+| 5 | **Commit message** includes reference to this diagnostic (e.g., “Fix dead‑lock introduced by PR #1234 – added lock ordering comment”). |
+| 6 | **CI alert** – if the test ever hangs again, the CI should abort with a clear “timeout” status. |
+
+---
+
+### TL;DR
+
+1. **Confirm the hang reproducibly occurs only after the patch.**
+2. **Apply the ordered hypotheses** – start with “blocking call” → “dead‑lock” → “external resource” → “infinite loop” …
+3. **Isolate the hang** by forcing a timeout, then **capture a live stack trace / syscalls**.
+4. **Follow the decision tree**: logs → external check → stack dump → strace → CPU profile.
+5. **Fix, guard, and document** the root cause.
+
+Follow this blueprint verbatim and you’ll turn a silent CI timeout into a pinpointed bug in **≤ 30 minutes** on most projects. Good luck!
+
+[ Prompt: 178.0 t/s | Generation: 51.0 t/s ]

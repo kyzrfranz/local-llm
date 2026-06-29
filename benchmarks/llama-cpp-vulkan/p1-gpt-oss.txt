@@ -1,0 +1,233 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-cli \
+  -hf ggml-org/gpt-oss-120b-GGUF \
+  --jinja -ngl 99 -fa 1 -c 40960 \
+  --temp 1.0 --top-p 1.0 \
+  --chat-template-kwargs '{"reasoning_effort":"high"}' \
+  -no-cnv \
+  -p "A TypeScript React frontend calls a Go REST service that shares protobuf-defined types with a Python analytics worker. A field is being renamed in the protobuf schema. Produce a strict, ordered execution blueprint to roll out this rename across all three services with zero downtime, listing the dependency order, the touch-points in each language, and the verification step after each stage."
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model...
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9608-70b54e1
+model      : ggml-org/gpt-oss-120b-GGUF
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> A TypeScript React frontend calls a Go REST service that shares protobuf-defined types with a Python analytics worker. A field is being renamed in the protobuf schema. Produce a strict, ordered execution blueprint to roll out this rename across all three services with zero downtime, listing the dependency order, the touch-points in each language, and the verification step after each stage.
+
+[Start thinking]
+We need to produce a strict, ordered execution blueprint. Must cover rename field in protobuf schema, across three services: TypeScript React frontend, Go REST service, Python analytics worker. Must have zero downtime. Provide dependency order, touch-points in each language, and verification step after each stage.
+
+We should propose approach: use protobuf compatibility rules, add new field, deprecate old, update services gradually, use versioning, etc. Provide steps: 1. Create new proto version with new field name, keep old field as deprecated. 2. Regenerate code in Go, Python, TypeScript. 3. Update Go service to read new field, still output both, etc. 4. Deploy Go service with both fields, ensure backward compatibility. 5. Update Python worker to read new field, still support old. Deploy. 6. Update React to send new field, still accept old. Deploy. 7. After all clients use new field, remove old field from proto, bump version, regenerate, deploy each. Provide verification steps: unit tests, integration tests, contract tests, smoke tests, monitoring.
+
+Make blueprint strict, ordered steps with dependency order. Provide tables maybe. Also mention CI/CD pipelines, feature flags. Ensure zero downtime using canary / blue-green.
+
+Will produce final answer.
+[End thinking]
+
+## Zero‑Downtime Roll‑out Blueprint
+**Goal** – Rename a protobuf field (`oldName`) to `newName` while keeping the three services (TS‑React, Go‑REST, Python‑Worker) live and fully functional at every step.
+
+**Assumptions**
+
+| Item | Detail |
+|------|--------|
+| **Proto compiler** | `protoc` with plugins: `protoc-gen-go`, `protoc-gen-ts` (via `ts-proto` or `protobufjs`), `protoc-gen-python`. |
+| **CI/CD** | Each repo has a pipeline that runs unit → integration → contract → smoke tests before a rolling‑deployment (K8s, ECS, or similar). |
+| **Versioning** | Semantic versioning for the protobuf package (`vX.Y.Z`). |
+| **Feature‑flags** | All services support a simple “useNewField” flag (env var or config). |
+| **Observability** | Request/response tracing (OpenTelemetry) and metric `proto_rename_success_total`. |
+| **Backward‑compatible protobuf rule** – Adding a new field is safe; renaming is *not*. The rename will be performed as **add‑new‑field + deprecate‑old‑field** → **drop‑old‑field** after all clients have migrated. |
+
+---
+
+## 1. Preparation (All Teams)
+
+| Step | Owner | Action |
+|------|-------|--------|
+| 1.1 | Architecture | Create a **design doc** that describes the rename, version bump (`vX+1.0.0`), deprecation policy (30‑day window), and rollout order. |
+| 1.2 | Repo Maintainers | Add a **feature flag** `USE_NEW_PROTO_FIELD` (default `false`) to each service’s config system. |
+| 1.3 | QA | Draft **contract tests** (pact / grpc‑gateway style) that verify the JSON‑encoded protobuf payloads contain either `oldName` or `newName`. |
+| 1.4 | Ops | Prepare a **canary deployment** plan for each service (e.g., 5 % of traffic). |
+| 1.5 | All | Freeze any unrelated changes to the shared proto file until the rollout is complete. |
+
+---
+
+## 2. Proto Change – “Add‑New‑Field + Deprecate”
+
+| Step | Owner | Touch‑point | Action | Verification |
+|------|-------|-------------|--------|---------------|
+| 2.1 | Proto Maintainer (Go repo) | `shared.proto` | Add the new field with the **same tag number** and mark the old field as `deprecated = true;`. **Do NOT** change the tag number. Example: <br>```proto<br>message MyMessage {<br>  // Old field (will stay for compatibility)<br>  string oldName = 1 [deprecated = true];<br>  // New name, same tag – clients will see the same binary layout<br>  string newName = 1;<br>}``` | Run `protoc --dry-run` and confirm generated files contain **both** `oldName` (deprecated) **and** `newName`. |
+| 2.2 | CI | Regenerate code for all three languages (see §3). | Commit the generated files to each repo in a **separate PR** (`proto‑vX+1.0.0`). | CI runs `go vet`, `tsc --noEmit`, `pytest -q` – all must pass. |
+| 2.3 | All | Tag the repo with `proto-vX+1.0.0`. | Ensure the tag is **immutable** and published to the artifact registry (e.g., npm, Go module proxy, PyPI). | Pull the new tag in a fresh checkout, run `protoc --version` → confirm generated code matches the schema. |
+
+> **Why this works** – Because the tag number does not change, the wire format is identical; the rename is *only* a source‑level convenience. Existing binaries continue to decode correctly.
+
+---
+
+## 3. Service‑by‑Service Migration – Order of Dependency
+
+**Dependency graph**
+
+```
+React (client) ──► Go REST (API) ──► Python Worker (async consumer)
+```
+
+Thus the rollout must flow **upstream → downstream** (client first, then API, then worker) **or** **downstream → upstream** depending on which side writes the field.
+In our case **React sends the field**, **Go stores / forwards it**, **Python reads it**.
+The safest zero‑downtime path is:
+
+1️⃣ **Go REST** – become *field‑agnostic* (accept both names).
+2️⃣ **Python Worker** – read whichever field is present.
+3️⃣ **React Frontend** – switch to sending the new name only.
+
+### 3.1. Update Go REST Service (First Touch‑point)
+
+| Step | Owner | Code change | Details |
+|------|-------|-------------|---------|
+| 3.1.1 | Go Team | **Model** (`my_message.pb.go`) – already contains both `OldName` (deprecated) and `NewName`. | No change needed, just ensure struct tags for JSON map both fields (`json:"oldName,omitempty"` and `json:"newName,omitempty"`). |
+| 3.1.2 | Go Team | **Handler** (`handler.go`) | ```go<br>// Read from request body (JSON) → proto<br>msg := &pb.MyMessage{}<br>if err := jsonpb.UnmarshalString(body, msg); err != nil { … }<br>// Normalise – if NewName empty but OldName set, copy over<br>if msg.GetNewName() == "" && msg.GetOldName() != "" {<br>    msg.NewName = msg.OldName<br>}<br>``` |
+| 3.1.3 | Go Team | **Response** – always emit `newName` (the generated code will emit the non‑empty field; keep `omitempty`). |
+| 3.1.4 | Go Team | **Feature‑flag** – gate the normalisation logic: when `USE_NEW_PROTO_FIELD=false` keep old behaviour, when true enforce `msg.NewName` must be set. |
+| 3.1.5 | Go Team | **Metrics** – increment `proto_rename_renamed_total` when a copy from old → new occurs. |
+| 3.1.6 | CI/CD | Deploy **canary** (5 % of traffic). | |
+| 3.1.7 | Verification | **Smoke test** – send JSON with only `oldName`; expect response JSON containing only `newName`. <br>**Contract test** – pact file must contain `newName`. <br>**Log check** – metric `proto_rename_renamed_total` > 0. |
+| 3.1.8 | Ops | After 5‑minute observation window, roll out to 100 % (blue‑green or rolling update). |
+| 3.1.9 | Post‑deploy | **Rollback** – disable feature‑flag; old field handling stays functional. |
+
+**Result:** Go REST now **accepts** both field names and **emits only** `newName`. No client change required yet.
+
+---
+
+### 3.2. Update Python Analytics Worker (Second Touch‑point)
+
+| Step | Owner | Code change | Details |
+|------|-------|-------------|---------|
+| 3.2.1 | Python Team | **Proto stub** (`my_message_pb2.py`) – regenerated, contains both attributes. |
+| 3.2.2 | Python Team | **Consumer** (e.g., Celery task) | ```python<br>msg = MyMessage.FromString(payload)<br># Normalise – if newName empty, fall back to oldName<br>if not msg.newName and msg.oldName:\n    msg.newName = msg.oldName\n``` |
+| 3.2.3 | Python Team | **Processing logic** – everywhere the field is used, reference `msg.newName`. |
+| 3.2.4 | Python Team | **Feature‑flag** (`USE_NEW_PROTO_FIELD`) – when true, raise an error if `msg.oldName` is present (helps catch stray old‑field messages after frontend migration). |
+| 3.2.5 | Python Team | **Metrics** – `proto_rename_worker_fallback_total` incremented on copy. |
+| 3.2.6 | CI/CD | Deploy canary worker (e.g., separate queue or 10 % of jobs). |
+| 3.2.7 | Verification | **Unit test** – feed a binary containing only `oldName`; assert `msg.newName` equals the expected value after normalisation. <br>**Integration test** – run end‑to‑end pipeline with Go service emitting only `newName`; worker must process correctly. |
+| 3.2.8 | Ops | After confirming metrics and no error spikes, roll out to full worker fleet. |
+| 3.2.9 | Post‑deploy | Keep the flag **off** (allow old → new copy) for now. |
+
+**Result:** Python worker is tolerant of both field names and internally works with `newName`.
+
+---
+
+### 3.3. Update TypeScript React Frontend (Third Touch‑point)
+
+| Step | Owner | Code change | Details |
+|------|-------|-------------|---------|
+| 3.3.1 | Frontend Team | **Proto generation** (`my_message.ts`) – regenerated via `ts-proto` (or `protobufjs`). Both `oldName?` and `newName?` appear; `oldName` is marked `/** @deprecated */`. |
+| 3.3.2 | Frontend Team | **Form / DTO** – change the field name in all TypeScript interfaces, React state, and form bindings from `oldName` → `newName`. |
+| 3.3.3 | Frontend Team | **Serializer** – when building the request payload, set only `newName`. |
+| 3.3.4 | Frontend Team | **Feature‑flag** – guard the rename: if `USE_NEW_PROTO_FIELD=false`, continue to send `oldName`; otherwise send `newName`. |
+| 3.3.5 | Frontend Team | **Lint / CI** – add a rule that forbids usage of `oldName` (except in legacy test fixtures). |
+| 3.3.6 | CI/CD | Deploy to a **staging** environment first; run Cypress tests that intercept the outgoing JSON and assert only `newName` is present when flag is true. |
+| 3.3.7 | Verification (Staging) | **Smoke test** – make a real API call; server (Go) should respond with `newName`. <br>**Metrics** – front‑end can emit a custom `frontend_proto_newfield_used_total`. |
+| 3.3.8 | Ops | **Canary rollout** – enable flag for 5 % of users (via feature flag service). |
+| 3.3.9 | Verification (Canary) | Monitor backend logs for any “missing newName” warnings; ensure no `proto_rename_renamed_total` increments (meaning no old → new copy). |
+| 3.3.10 | Ops | After 15 min of stable traffic, roll out flag to **100 %** of users. |
+| 3.3.11 | Post‑deploy | **Turn off** the flag for backward compatibility – now the code **always** sends `newName`. |
+
+**Result:** Frontend now **only emits** `newName`. Go and Python already accept only `newName`, so the whole pipeline is fully on the new schema.
+
+---
+
+## 4. Final Cleanup – Remove the Deprecated Field
+
+| Step | Owner | Action |
+|------|-------|--------|
+| 4.1 | Proto Maintainer | Delete the `oldName` line from `shared.proto`. Keep the same tag number (`= 1`). Commit as `proto‑vX+2.0.0` (major bump because the source name disappears). |
+| 4.2 | All Teams | Regenerate code **once more** (Go, TS, Python). |
+| 4.3 | CI | Run full test matrix (unit → contract → end‑to‑end). |
+| 4.4 | Deploy | Perform a **rolling update** of each service (same order as before or in parallel – no dependency left). |
+| 4.5 | Verification | - Ensure **no** compilation warnings about missing `oldName`. <br> - Confirm metrics `proto_rename_*` are at zero (no fallback copies). <br> - Run a **schema‑validation** job that loads a sample message from each service and verifies the JSON schema only contains `newName`. |
+| 4.6 | Documentation | Update API docs, OpenAPI spec, and README to reflect the new field name. |
+| 4.7 | Release | Tag the repos with `vX+2.0.0` and publish the new protobuf artifact. |
+
+---
+
+## 5. Full Verification Matrix (After Each Stage)
+
+| Stage | Test Type | Scope | Success Criterion |
+|-------|-----------|-------|-------------------|
+| **After Go Update** | Unit (Go) | Normalisation logic | 100 % of messages containing only `oldName` result in a populated `newName`. |
+| | Integration | Go ↔ Python (mock) | Payload with `newName` round‑trips correctly. |
+| | Contract (Pact) | Go API contract | Consumer contract expects `newName` only. |
+| | Smoke (Canary) | Real traffic (5 %) | No 5xx, metric `proto_rename_renamed_total` ≥ 0 (means copy succeeded). |
+| **After Python Update** | Unit (Python) | Fallback copy | Same as Go verification, plus no exception when only `newName` is present. |
+| | Integration | Go → Python (end‑to‑end) | End‑to‑end job produces expected analytics output. |
+| | Smoke (Canary) | Worker queue (10 %) | No processing errors, metric `proto_rename_worker_fallback_total` > 0 (if any old messages). |
+| **After Frontend Update** | Unit (TS) | TypeScript compile | No reference to `oldName` (lint rule passes). |
+| | E2E (Cypress) | Browser → API | Outgoing request body contains only `newName`. |
+| | Smoke (Canary) | 5 % of users | Backend logs show **zero** `proto_rename_renamed_total`. |
+| **After Final Cleanup** | Full Regression Suite | All services together | 0 failures, all generated proto files lack `oldName`. |
+| | Load Test | 100 % traffic | Latency < baseline, error rate 0. |
+| | Monitoring | Production dashboards | `proto_rename_*` counters stay at 0 for 48 h. |
+
+---
+
+## 6. Timeline (Typical “quick‑roll”)
+
+| Day | Activity |
+|-----|----------|
+| **Day 0** | Freeze, design doc, feature‑flag scaffolding. |
+| **Day 1** | Proto change (add + deprecate), generate, tag, push. |
+| **Day 2** | Go service update → canary → full rollout (≈4 h). |
+| **Day 3** | Python worker update → canary → full rollout (≈4 h). |
+| **Day 4** | Frontend update → staged feature‑flag rollout (5 % → 100 %). |
+| **Day 5** | Verification window, monitor metrics, resolve any regression. |
+| **Day 6** | Remove deprecated field, regenerate, roll out final clean‑up. |
+| **Day 7** | Post‑mortem, close ticket. |
+
+*All steps can be compressed to a single day if the CI/CD pipelines are fast and you have a robust canary infrastructure; the ordering and verification checkpoints must still be respected.*
+
+---
+
+## 7. Checklist for “Zero‑Downtime”
+
+- [ ] **Proto compatibility** – tag number unchanged, only added a new name.
+- [ ] **Feature‑flag** present in each service (default off).
+- [ ] **Canary deployments** for every service.
+- [ ] **Metrics & alerts** for fallback copies (`proto_rename_*`).
+- [ ] **Contract tests** updated to expect `newName`.
+- [ ] **Observability** – request trace includes a tag `proto_version=vX+1.0.0`.
+- [ ] **Rollback plan** – flip feature‑flag off, redeploy previous container image.
+- [ ] **Documentation** – API spec, README, and changelog reflect the rename.
+
+---
+
+### TL;DR Execution Order
+
+1. **Proto** – add `newName`, deprecate `oldName`.
+2. **Go REST** – accept both, emit only `newName`. Deploy canary → 100 %.
+3. **Python Worker** – accept both, normalize to `newName`. Deploy canary → 100 %.
+4. **React Frontend** – send only `newName` (feature‑flag gated). Deploy canary → 100 %.
+5. **Cleanup** – delete `oldName`, regenerate, deploy final version.
+
+Following the blueprint above guarantees that at every moment **at least one service** can understand the payload, eliminating any downtime for end users.
+
+[ Prompt: 202.1 t/s | Generation: 51.9 t/s ]

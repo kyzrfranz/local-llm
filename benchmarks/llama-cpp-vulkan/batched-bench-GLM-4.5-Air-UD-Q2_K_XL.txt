@@ -1,0 +1,38 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-batched-bench \
+   --hf-repo unsloth/GLM-4.5-Air-GGUF \
+  --hf-file GLM-4.5-Air-UD-Q2_K_XL.gguf \
+  -c 16384 -ngl 99 \
+  -npp 1024 -ntg 256 -npl 1,2,4,8
+0.00.920.411 W load: special_eot_id is not in special_eog_ids - the tokenizer config may be incorrect
+0.00.920.420 W load: special_eom_id is not in special_eog_ids - the tokenizer config may be incorrect
+0.00.959.616 W model has unused tensor blk.46.attn_norm.weight (size = 16384 bytes) -- ignoring
+0.00.959.625 W model has unused tensor blk.46.attn_q.weight (size = 28311552 bytes) -- ignoring
+0.00.959.628 W model has unused tensor blk.46.attn_k.weight (size = 2359296 bytes) -- ignoring
+0.00.959.630 W model has unused tensor blk.46.attn_v.weight (size = 2359296 bytes) -- ignoring
+0.00.959.644 W model has unused tensor blk.46.attn_output.weight (size = 28311552 bytes) -- ignoring
+0.00.959.651 W model has unused tensor blk.46.post_attention_norm.weight (size = 16384 bytes) -- ignoring
+0.00.959.653 W model has unused tensor blk.46.ffn_gate_inp.weight (size = 2097152 bytes) -- ignoring
+0.00.959.656 W model has unused tensor blk.46.exp_probs_b.bias (size = 512 bytes) -- ignoring
+0.00.959.658 W model has unused tensor blk.46.ffn_gate_exps.weight (size = 242221056 bytes) -- ignoring
+0.00.959.660 W model has unused tensor blk.46.ffn_down_exps.weight (size = 507510784 bytes) -- ignoring
+0.00.959.662 W model has unused tensor blk.46.ffn_up_exps.weight (size = 242221056 bytes) -- ignoring
+0.00.959.664 W model has unused tensor blk.46.ffn_gate_shexp.weight (size = 3244032 bytes) -- ignoring
+0.00.959.666 W model has unused tensor blk.46.ffn_down_shexp.weight (size = 4325376 bytes) -- ignoring
+0.00.959.668 W model has unused tensor blk.46.ffn_up_shexp.weight (size = 3244032 bytes) -- ignoring
+0.00.959.673 W model has unused tensor blk.46.nextn.eh_proj.weight (size = 11010048 bytes) -- ignoring
+0.00.959.676 W model has unused tensor blk.46.nextn.enorm.weight (size = 16384 bytes) -- ignoring
+0.00.959.678 W model has unused tensor blk.46.nextn.hnorm.weight (size = 16384 bytes) -- ignoring
+0.00.959.680 W model has unused tensor blk.46.nextn.embed_tokens.weight (size = 203685888 bytes) -- ignoring
+0.00.959.683 W model has unused tensor blk.46.nextn.shared_head_head.weight (size = 203685888 bytes) -- ignoring
+0.00.959.686 W model has unused tensor blk.46.nextn.shared_head_norm.weight (size = 16384 bytes) -- ignoring
+0.06.070.670 W llama_context: n_ctx_seq (2048) < n_ctx_train (131072) -- the full capacity of the model will not be utilized
+
+llama_batched_bench: n_kv_max = 16384, n_batch = 2048, n_ubatch = 512, flash_attn = -1, is_pp_shared = 0, is_tg_separate = 0, n_gpu_layers = 99, n_threads = 16, n_threads_batch = 16
+
+|    PP |     TG |    B |   N_KV |   T_PP s | S_PP t/s |   T_TG s | S_TG t/s |      T s |    S t/s |
+|-------|--------|------|--------|----------|----------|----------|----------|----------|----------|
+|  1024 |    256 |    1 |   1280 |    3.261 |   314.01 |    8.868 |    28.87 |   12.129 |   105.53 |
+|  1024 |    256 |    2 |   2560 |    7.061 |   290.06 |   11.764 |    43.52 |   18.825 |   135.99 |
+|  1024 |    256 |    4 |   5120 |   14.185 |   288.76 |   17.364 |    58.97 |   31.549 |   162.29 |
+|  1024 |    256 |    8 |  10240 |   28.266 |   289.82 |   28.908 |    70.85 |   57.174 |   179.10 |

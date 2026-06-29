@@ -1,0 +1,15 @@
+MESA_VK_DEVICE_SELECT=1002:1586 \
+nix shell nixpkgs#llama-cpp-vulkan -c llama-bench \
+   --hf-repo unsloth/GLM-4.5-Air-GGUF \
+  --hf-file UD-Q4_K_XL/GLM-4.5-Air-UD-Q4_K_XL-00001-of-00002.gguf \
+    -ngl 99 -p 1024 -n 256
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon 8060S Graphics (RADV STRIX_HALO) (radv) | uma: 1 | fp16: dot2 | bf16: 0 | warp size: 64 | shared memory: 65536 | int dot: 1 | matrix cores: KHR_coopmat
+load_backend: loaded Vulkan backend from /nix/store/mqq37s52wv4z59wa4g5gccij5iacjawp-llama-cpp-9608/bin/libggml-vulkan.so
+load_backend: loaded CPU backend from /nix/store/mqq37s52wv4z59wa4g5gccij5iacjawp-llama-cpp-9608/bin/libggml-cpu-zen4.so
+Downloading GLM-4.5-Air-UD-Q4_K_XL-00002-of-00002.g… ─────────────── 100%
+Downloading GLM-4.5-Air-UD-Q4_K_XL-00001-of-00002.g… ─────────────── 100%
+| model                          |       size |     params | backend    | ngl |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --------------: | -------------------: |
+| glm4moe 106B.A12B Q4_K - Medium |  63.06 GiB |   110.47 B | Vulkan     |  99 |          pp1024 |        253.47 ± 3.34 |
+| glm4moe 106B.A12B Q4_K - Medium |  63.06 GiB |   110.47 B | Vulkan     |  99 |           tg256 |         24.89 ± 0.12 |
