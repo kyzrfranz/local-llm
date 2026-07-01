@@ -231,6 +231,7 @@ CoT grows. Sampling: temp 0.6, top_p 0.95, top_k 20, min_p 0.0, presence_penalty
 | **Qwen3-Next-Thinking** | **architect** | 80B / 3B | 42.77 | 58.7 | 712 | single-stream only |
 | **Qwen3.6-35B-A3B** | **dual-role candidate** | 35B / 3B | 21.27 | 59.7 (MTP↑) | 1106 | **159.8 (2.7×)** |
 | Qwen3.6-27B (dense) | rejected | 27B dense | 16.39 | **11.9** (22.9 MTP) | 328 | single-stream only |
+| Qwen3.5-122B-A10B | rejected (arch. cand.) | 122B / 10B | 71.7 | 22.2 (no MTP) | ~380 | single-stream only |
 
 > **Qwen3.6-27B is the active-parameter wall, stated plainly:** a 16 GiB dense
 > model decodes ~5× *slower* than the 46 GiB Qwen3-Coder-Next, because decode is
@@ -251,6 +252,25 @@ CoT grows. Sampling: temp 0.6, top_p 0.95, top_k 20, min_p 0.0, presence_penalty
 > The de-risked finding (MTP works here) is what makes the **35B-A3B** worth a
 > real test: MoE 3B-active speed floor PLUS a proven MTP bump. That's the one
 > Qwen3.6 model with a path to competing — see §3.x test below.
+>
+> **Qwen3.5-122B-A10B (10B-active architect candidate) — REJECTED.** 71.7 GiB,
+> decode **22.2 t/s** (`llama-bench`; ~21–23 on `llama-server`, the predicted ~3×
+> slowdown vs the 3B-active MoEs held), prefill **~380 t/s at real 1817-token
+> context** (the 53 t/s short-prompt figure was a per-request-overhead artifact).
+> **No MTP:** despite the "A10B" naming the GGUF ships *no MTP layers* —
+> `llama-server` refuses `--spec-type draft-mtp` (*"model doesn't contain MTP
+> layers"*), so there's no speculative bump to reclaim decode. Quality (P1–P3,
+> thinking on, same rubric): beat the *35B* on P2's adapter-as-facade / keep-
+> original-API insight, but STILL hit the `@JvmRecord`/JDK-16 trap (the
+> discriminator Qwen3-Next passes), didn't finish P1 in 4000 tokens (~a dozen
+> "Wait/Correction" CoT reversals), and only matched the smaller models on P3
+> (no `D`-state awareness). Net: caught one detail the *35B* missed on one
+> prompt; **beat the 80B-A3B-Thinking architect (3/3) on nothing**, shares its
+> `@JvmRecord` bug, and is strictly dominated on every systems axis (decode,
+> prefill, memory) at ~3× the active-param cost. Same "bigger ≠ better on this
+> ~256 GB/s box" verdict as the dense-27B. Architect stays 80B-A3B-Thinking /
+> 35B-A3B; the 235B-A22B (Node C) tier is untouched by this. Full write-up:
+> `bench-qwen35-122b-a10b.md`.
 
 ---
 
