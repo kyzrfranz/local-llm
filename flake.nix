@@ -19,7 +19,7 @@
             { networking.hostName = hostName; }
             ./hosts/${hostName}/configuration.nix
             ./hosts/${hostName}/hardware-configuration.nix
-            ./hosts/${hostName}/strix-halo.nix
+            ./hosts/${hostName}/strix-halo-single.nix
           ] ++ extraModules;
         };
     in
